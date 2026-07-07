@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Dialog,
@@ -8,9 +9,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { ChevronRight, ChevronLeft } from "lucide-react";
-import { monthLabel } from "@/lib/format";
+import { monthLabel, addMonths } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const MONTHS_HE = [
@@ -18,20 +19,46 @@ const MONTHS_HE = [
   "יולי", "אוגוסט", "ספטמבר", "אוקטובר", "נובמבר", "דצמבר",
 ];
 
-/** Tap the month label to jump to any month/year. `month` is "YYYY-MM-01". */
-export function MonthPicker({ month }: { month: string }) {
+/**
+ * Month stepper + tap-to-pick dialog. `month` is "YYYY-MM-01".
+ * Builds URLs as `${basePath}?...params&month=YYYY-MM` (props stay serializable
+ * so this works when rendered from a Server Component).
+ */
+export function MonthNav({
+  month,
+  basePath,
+  params,
+}: {
+  month: string;
+  basePath: string;
+  params?: Record<string, string>;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [y, m] = month.split("-").map(Number);
   const [year, setYear] = useState(y);
 
+  function hrefFor(ym: string) {
+    const sp = new URLSearchParams(params);
+    sp.set("month", ym);
+    return `${basePath}?${sp.toString()}`;
+  }
+
   function go(mo: number) {
-    router.push(`/dashboard?month=${year}-${String(mo).padStart(2, "0")}`);
+    router.push(hrefFor(`${year}-${String(mo).padStart(2, "0")}`));
     setOpen(false);
   }
 
   return (
-    <>
+    <div className="flex items-center gap-1">
+      <Link
+        href={hrefFor(addMonths(month, -1).slice(0, 7))}
+        className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
+        aria-label="חודש קודם"
+      >
+        <ChevronRight className="size-4" />
+      </Link>
+
       <button
         onClick={() => {
           setYear(y);
@@ -42,12 +69,19 @@ export function MonthPicker({ month }: { month: string }) {
         {monthLabel(month)}
       </button>
 
+      <Link
+        href={hrefFor(addMonths(month, 1).slice(0, 7))}
+        className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
+        aria-label="חודש הבא"
+      >
+        <ChevronLeft className="size-4" />
+      </Link>
+
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-xs">
           <DialogHeader>
             <DialogTitle>בחירת חודש</DialogTitle>
           </DialogHeader>
-
           <div className="mb-3 flex items-center justify-between">
             <Button
               variant="ghost"
@@ -67,7 +101,6 @@ export function MonthPicker({ month }: { month: string }) {
               <ChevronLeft className="size-4" />
             </Button>
           </div>
-
           <div className="grid grid-cols-3 gap-2">
             {MONTHS_HE.map((label, i) => {
               const mo = i + 1;
@@ -90,6 +123,6 @@ export function MonthPicker({ month }: { month: string }) {
           </div>
         </DialogContent>
       </Dialog>
-    </>
+    </div>
   );
 }

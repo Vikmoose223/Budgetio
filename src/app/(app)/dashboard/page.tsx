@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { InviteCode } from "@/components/invite-code";
 import { SpendingDonut } from "./spending-donut";
 import { TrendChart } from "./trend-chart";
-import { MonthPicker } from "./month-picker";
+import { MonthNav } from "@/components/month-nav";
 import { CategoryBreakdown } from "./category-breakdown";
 import { formatILS, firstOfMonthISO, addMonths, periodRange } from "@/lib/format";
 import { summarizeMonth, monthlyExpenseTrend } from "@/lib/aggregate";
@@ -16,8 +16,6 @@ import {
   Users,
   PiggyBank,
   Plus,
-  ChevronRight,
-  ChevronLeft,
   Wallet,
   ArrowUp,
   ArrowDown,
@@ -117,24 +115,7 @@ export default async function DashboardPage({
       {/* Month switcher */}
       <header className="mb-5 flex items-center justify-between">
         <p className="text-sm text-muted-foreground">{household?.name ?? "משק בית"}</p>
-        <div className="flex items-center gap-1">
-          {/* In RTL, "previous" points right */}
-          <Link
-            href={`/dashboard?month=${addMonths(month, -1).slice(0, 7)}`}
-            className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
-            aria-label="חודש קודם"
-          >
-            <ChevronRight className="size-4" />
-          </Link>
-          <MonthPicker month={month} />
-          <Link
-            href={`/dashboard?month=${addMonths(month, 1).slice(0, 7)}`}
-            className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
-            aria-label="חודש הבא"
-          >
-            <ChevronLeft className="size-4" />
-          </Link>
-        </div>
+        <MonthNav month={month} basePath="/dashboard" />
       </header>
 
       {/* Insights */}

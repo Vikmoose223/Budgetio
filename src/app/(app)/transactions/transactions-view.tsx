@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ExpenseForm, type Category, type ExpenseValues } from "./expense-form";
+import { MonthNav } from "@/components/month-nav";
 import { categoryIconElement, categoryTintStyle } from "@/lib/categories";
 import { formatILS, formatDate } from "@/lib/format";
 import { toast } from "sonner";
@@ -52,13 +53,15 @@ export function TransactionsView({
   userId,
   categories,
   initial,
-  filter,
+  month,
+  categoryFilter,
 }: {
   householdId: string;
   userId: string;
   categories: Category[];
   initial: Txn[];
-  filter?: { label: string } | null;
+  month: string;
+  categoryFilter: { id: string; label: string } | null;
 }) {
   const [txns, setTxns] = useState<Txn[]>(initial);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -205,22 +208,29 @@ export function TransactionsView({
         </Button>
       </header>
 
-      {filter && (
-        <div className="mt-4 flex items-center gap-2">
-          <span className="inline-flex items-center rounded-full bg-accent px-3 py-1 text-sm text-accent-foreground">
-            {filter.label}
-          </span>
-          <Link
-            href="/transactions"
-            className="text-sm text-muted-foreground hover:text-foreground"
-          >
-            הצג הכול
-          </Link>
-        </div>
-      )}
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <MonthNav
+          month={month}
+          basePath="/transactions"
+          params={categoryFilter ? { category: categoryFilter.id } : undefined}
+        />
+        {categoryFilter && (
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center rounded-full bg-accent px-3 py-1 text-sm text-accent-foreground">
+              {categoryFilter.label}
+            </span>
+            <Link
+              href={`/transactions?month=${month.slice(0, 7)}`}
+              className="text-sm text-muted-foreground hover:text-foreground"
+            >
+              הצג הכול
+            </Link>
+          </div>
+        )}
+      </div>
 
       {txns.length > 0 && (
-        <div className="relative mt-4">
+        <div className="relative mt-3">
           <Search className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
