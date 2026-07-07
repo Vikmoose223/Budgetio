@@ -22,6 +22,8 @@ test.describe("auth + household onboarding", () => {
       testInfo.project.name !== "chromium",
       "auth flow runs on chromium only",
     );
+    // This is one long end-to-end happy path; give it room.
+    test.setTimeout(120_000);
 
     const email = `e2e_${Date.now()}@budget-app.test`;
     const password = "test-pw-123456";
@@ -95,6 +97,16 @@ test.describe("auth + household onboarding", () => {
     await expect(page).toHaveURL(/\/transactions$/);
     await expect(page.getByText("שופרסל בדיקה").first()).toBeVisible();
     await expect(page.getByText("דלק בדיקה").first()).toBeVisible();
+
+    // --- Settings: edit a category's monthly goal ---
+    await page.getByRole("link", { name: "הגדרות" }).click();
+    await expect(page).toHaveURL(/\/settings$/);
+    await page.getByText("קטגוריות ויעדים").click();
+    await expect(page).toHaveURL(/\/settings\/categories$/);
+    await page.getByRole("button", { name: /מזון/ }).click();
+    await page.getByLabel("יעד חודשי").fill("2500");
+    await page.getByRole("button", { name: "שמירה" }).click();
+    await expect(page.getByText(/2,500/).first()).toBeVisible();
 
     // --- Sign out ---
     await page.goto("/dashboard");

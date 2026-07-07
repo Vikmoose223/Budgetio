@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { InviteCode } from "./invite-code";
+import { InviteCode } from "@/components/invite-code";
 import { SpendingDonut } from "./spending-donut";
 import { TrendChart } from "./trend-chart";
 import { categoryIconElement, categoryTintStyle } from "@/lib/categories";

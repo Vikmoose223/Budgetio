@@ -1,6 +1,8 @@
 import Link from "next/link";
-import { PiggyBank, LogOut } from "lucide-react";
+import { PiggyBank, LogOut, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { DesktopNav } from "@/components/nav";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -26,6 +28,13 @@ export function AppHeader() {
         </div>
         <div className="flex items-center gap-1">
           <ThemeToggle />
+          <Link
+            href="/settings"
+            className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
+            aria-label="הגדרות"
+          >
+            <Settings className="size-4" />
+          </Link>
           <form action="/auth/signout" method="post">
             <Button type="submit" variant="ghost" size="sm">
               <LogOut className="size-4" />
