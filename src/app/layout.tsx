@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Heebo } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/theme-provider";
+import { SWRegister } from "@/components/sw-register";
 import "./globals.css";
 
 // Heebo carries full Hebrew + Latin glyphs, so the whole RTL UI shares one font.
@@ -17,6 +18,15 @@ export const metadata: Metadata = {
     template: "%s · תקציב זוגי",
   },
   description: "מעקב הוצאות, יעדים ותובנות לזוג — פשוט וברור.",
+  icons: {
+    icon: "/icons/icon-192.png",
+    apple: "/icons/apple-touch-icon.png",
+  },
+  appleWebApp: {
+    capable: true,
+    title: "תקציב זוגי",
+    statusBarStyle: "default",
+  },
 };
 
 export const viewport: Viewport = {
@@ -47,6 +57,7 @@ export default function RootLayout({
         >
           {children}
           <Toaster position="top-center" />
+          <SWRegister />
         </ThemeProvider>
       </body>
     </html>
