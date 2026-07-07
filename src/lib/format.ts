@@ -46,6 +46,20 @@ export function formatDate(iso: string): string {
   }).format(date);
 }
 
+/** Shift a month key (YYYY-MM-01) by n months, e.g. addMonths("2026-01-01", -1) → "2025-12-01". */
+export function addMonths(monthISO: string, n: number): string {
+  const [y, m] = monthISO.split("-").map(Number);
+  return firstOfMonthISO(new Date(y, (m ?? 1) - 1 + n, 1));
+}
+
+/** Half-open date range [start, endExclusive) covering the given month. */
+export function monthRange(monthISO: string): {
+  start: string;
+  endExclusive: string;
+} {
+  return { start: monthISO, endExclusive: addMonths(monthISO, 1) };
+}
+
 /** Human month label in Hebrew, e.g. "יולי 2026". */
 export function monthLabel(monthISO: string): string {
   const [y, m] = monthISO.split("-").map(Number);

@@ -5,11 +5,36 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { InviteCode } from "./invite-code";
+import { SpendingDonut } from "./spending-donut";
+import { TrendChart } from "./trend-chart";
 import { categoryIconElement, categoryTintStyle } from "@/lib/categories";
-import { formatILS, firstOfMonthISO, monthLabel } from "@/lib/format";
-import { Users, Target, PiggyBank, Plus } from "lucide-react";
+import {
+  formatILS,
+  firstOfMonthISO,
+  addMonths,
+  monthRange,
+  monthLabel,
+} from "@/lib/format";
+import { summarizeMonth, monthlyExpenseTrend } from "@/lib/aggregate";
+import {
+  Users,
+  PiggyBank,
+  Plus,
+  ChevronRight,
+  ChevronLeft,
+  Wallet,
+} from "lucide-react";
 
-export default async function DashboardPage() {
+function normalizeMonth(raw: string | undefined): string {
+  if (raw && /^\d{4}-\d{2}(-01)?$/.test(raw)) return `${raw.slice(0, 7)}-01`;
+  return firstOfMonthISO();
+}
+
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ month?: string }>;
+}) {
   const { supabase, user } = await requireUser();
 
   const { data: profile } = await supabase
@@ -17,92 +42,169 @@ export default async function DashboardPage() {
     .select("household_id")
     .eq("id", user.id)
     .single();
-
   if (!profile?.household_id) redirect("/onboarding");
   const householdId = profile.household_id;
-  const month = firstOfMonthISO();
 
-  const [{ data: household }, { data: members }, { data: categories }, { data: goals }] =
-    await Promise.all([
-      supabase.from("households").select("name, invite_code").eq("id", householdId).single(),
-      supabase.from("profiles").select("id, display_name").eq("household_id", householdId),
-      supabase
-        .from("categories")
-        .select("id, name, icon, color, kind, sort_order")
-        .eq("household_id", householdId)
-        .order("sort_order"),
-      supabase
-        .from("budget_goals")
-        .select("category_id, target_amount")
-        .eq("household_id", householdId)
-        .eq("month", month),
-    ]);
+  const month = normalizeMonth((await searchParams).month);
+  const { start, endExclusive } = monthRange(month);
+  const trendStart = addMonths(month, -5);
 
-  // No categories yet → finish onboarding first.
+  const [
+    { data: household },
+    { data: members },
+    { data: categories },
+    { data: goals },
+    { data: monthTxns },
+    { data: trendTxns },
+  ] = await Promise.all([
+    supabase.from("households").select("name, invite_code").eq("id", householdId).single(),
+    supabase.from("profiles").select("id, display_name").eq("household_id", householdId),
+    supabase
+      .from("categories")
+      .select("id, name, icon, color, kind")
+      .eq("household_id", householdId)
+      .order("sort_order"),
+    supabase
+      .from("budget_goals")
+      .select("category_id, target_amount")
+      .eq("household_id", householdId)
+      .eq("month", month),
+    supabase
+      .from("transactions")
+      .select("category_id, amount, occurred_on")
+      .eq("household_id", householdId)
+      .gte("occurred_on", start)
+      .lt("occurred_on", endExclusive),
+    supabase
+      .from("transactions")
+      .select("category_id, amount, occurred_on")
+      .eq("household_id", householdId)
+      .gte("occurred_on", trendStart)
+      .lt("occurred_on", endExclusive),
+  ]);
+
   if (!categories || categories.length === 0) redirect("/onboarding");
 
   const goalByCategory = new Map(
     (goals ?? []).map((g) => [g.category_id, Number(g.target_amount)]),
   );
-  const expenseCats = categories.filter((c) => c.kind === "expense");
-  const savingCats = categories.filter((c) => c.kind === "saving");
-  const totalExpenseGoal = expenseCats.reduce(
-    (sum, c) => sum + (goalByCategory.get(c.id) ?? 0),
-    0,
+  const summary = summarizeMonth(categories, monthTxns ?? [], goalByCategory);
+  const trend = monthlyExpenseTrend(month, 6, categories, trendTxns ?? []);
+
+  const donutData = summary.perCategory
+    .filter((c) => c.category.kind === "expense" && c.spent > 0)
+    .map((c) => ({
+      name: c.category.name,
+      value: c.spent,
+      color: c.category.color ?? "chart-1",
+    }));
+
+  const remaining = summary.totalExpenseGoal - summary.totalExpenseSpent;
+  const expenseRows = summary.perCategory.filter(
+    (c) => c.category.kind === "expense",
   );
-  const totalSavingGoal = savingCats.reduce(
-    (sum, c) => sum + (goalByCategory.get(c.id) ?? 0),
-    0,
+  const savingRows = summary.perCategory.filter(
+    (c) => c.category.kind === "saving",
   );
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-5 py-8 sm:px-6">
-      <header className="mb-6">
+    <div className="mx-auto w-full max-w-3xl px-5 py-6 sm:px-6">
+      {/* Month switcher */}
+      <header className="mb-5 flex items-center justify-between">
         <p className="text-sm text-muted-foreground">{household?.name ?? "משק בית"}</p>
-        <h1 className="mt-1 text-2xl font-bold tracking-tight">{monthLabel(month)}</h1>
+        <div className="flex items-center gap-1">
+          {/* In RTL, "previous" points right */}
+          <Link
+            href={`/dashboard?month=${addMonths(month, -1).slice(0, 7)}`}
+            className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
+            aria-label="חודש קודם"
+          >
+            <ChevronRight className="size-4" />
+          </Link>
+          <span className="min-w-28 text-center text-sm font-semibold">
+            {monthLabel(month)}
+          </span>
+          <Link
+            href={`/dashboard?month=${addMonths(month, 1).slice(0, 7)}`}
+            className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
+            aria-label="חודש הבא"
+          >
+            <ChevronLeft className="size-4" />
+          </Link>
+        </div>
       </header>
 
-      {/* Goal summary */}
-      <div className="grid grid-cols-2 gap-3">
+      {/* Summary tiles */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <StatTile
-          icon={<Target className="size-4" />}
-          label="יעד הוצאות חודשי"
-          value={formatILS(totalExpenseGoal)}
+          icon={<Wallet className="size-4" />}
+          label="הוצאת החודש"
+          value={formatILS(summary.totalExpenseSpent)}
+        />
+        <StatTile
+          icon={<Wallet className="size-4" />}
+          label={remaining >= 0 ? "נשאר מהתקציב" : "חריגה מהתקציב"}
+          value={formatILS(Math.abs(remaining))}
+          tone={remaining >= 0 ? "ok" : "danger"}
         />
         <StatTile
           icon={<PiggyBank className="size-4" />}
-          label="יעד חיסכון חודשי"
-          value={formatILS(totalSavingGoal)}
-          accent
+          label="חיסכון החודש"
+          value={formatILS(summary.totalSavingSpent)}
+          tone="accent"
         />
       </div>
 
-      {/* Goals per category */}
+      {/* Donut + breakdown */}
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">התפלגות הוצאות</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <SpendingDonut data={donutData} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">מול היעדים</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            {expenseRows.map((row) => (
+              <CategoryProgress key={row.category.id} row={row} />
+            ))}
+            {savingRows.length > 0 && (
+              <div className="mt-1 border-t border-border pt-3">
+                {savingRows.map((row) => (
+                  <CategoryProgress key={row.category.id} row={row} saving />
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Trend */}
       <Card className="mt-4">
         <CardHeader>
-          <CardTitle className="text-base">היעדים שלכם</CardTitle>
+          <CardTitle className="text-base">מגמת הוצאות (6 חודשים)</CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-col gap-1">
-          {[...expenseCats, ...savingCats].map((c) => {
-            const goal = goalByCategory.get(c.id);
-            return (
-              <div
-                key={c.id}
-                className="flex items-center gap-3 rounded-lg px-1 py-2"
-              >
-                <span
-                  className="flex size-8 shrink-0 items-center justify-center rounded-lg"
-                  style={categoryTintStyle(c.color)}
-                >
-                  {categoryIconElement(c.icon)}
-                </span>
-                <span className="flex-1 text-sm font-medium">{c.name}</span>
-                <span className="text-sm tabular-nums text-muted-foreground">
-                  {goal ? formatILS(goal) : "—"}
-                </span>
-              </div>
-            );
-          })}
+        <CardContent>
+          <TrendChart data={trend} />
+        </CardContent>
+      </Card>
+
+      {/* Add expense CTA */}
+      <Card className="mt-4">
+        <CardContent className="flex flex-col items-center gap-3 py-5 text-center sm:flex-row sm:justify-between sm:text-right">
+          <p className="text-sm text-muted-foreground">
+            רשמו הוצאות כדי לעדכן את התמונה החודשית.
+          </p>
+          <Link href="/transactions" className={cn(buttonVariants(), "shrink-0")}>
+            <Plus className="size-4" />
+            הוספת הוצאה
+          </Link>
         </CardContent>
       </Card>
 
@@ -142,21 +244,6 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
       </div>
-
-      <Card className="mt-4">
-        <CardContent className="flex flex-col items-center gap-3 py-6 text-center sm:flex-row sm:justify-between sm:text-right">
-          <p className="text-sm text-muted-foreground">
-            רשמו הוצאות ועקבו אחריהן מול היעדים החודשיים.
-          </p>
-          <Link
-            href="/transactions"
-            className={cn(buttonVariants(), "shrink-0")}
-          >
-            <Plus className="size-4" />
-            הוספת הוצאה
-          </Link>
-        </CardContent>
-      </Card>
     </div>
   );
 }
@@ -165,24 +252,80 @@ function StatTile({
   icon,
   label,
   value,
-  accent,
+  tone = "muted",
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
-  accent?: boolean;
+  tone?: "muted" | "ok" | "danger" | "accent";
 }) {
+  const toneClass =
+    tone === "danger"
+      ? "bg-destructive/10 text-destructive"
+      : tone === "ok"
+        ? "bg-success/10 text-success"
+        : tone === "accent"
+          ? "bg-primary/10 text-primary"
+          : "bg-accent text-accent-foreground";
   return (
     <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-      <div
-        className={`flex size-8 items-center justify-center rounded-lg ${
-          accent ? "bg-primary/10 text-primary" : "bg-accent text-accent-foreground"
-        }`}
-      >
+      <div className={cn("flex size-8 items-center justify-center rounded-lg", toneClass)}>
         {icon}
       </div>
       <p className="mt-3 text-xs text-muted-foreground">{label}</p>
-      <p className="mt-0.5 text-xl font-bold tabular-nums">{value}</p>
+      <p
+        className={cn(
+          "mt-0.5 text-xl font-bold tabular-nums",
+          tone === "danger" && "text-destructive",
+        )}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function CategoryProgress({
+  row,
+  saving,
+}: {
+  row: { category: { name: string; icon: string | null; color: string | null }; spent: number; goal: number };
+  saving?: boolean;
+}) {
+  const { category, spent, goal } = row;
+  const pct = goal > 0 ? Math.min(100, (spent / goal) * 100) : 0;
+  const over = goal > 0 && spent > goal;
+  const barColor = saving
+    ? "var(--success)"
+    : over
+      ? "var(--destructive)"
+      : `var(--${category.color ?? "chart-1"})`;
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-2.5">
+        <span
+          className="flex size-7 shrink-0 items-center justify-center rounded-md"
+          style={categoryTintStyle(category.color)}
+        >
+          {categoryIconElement(category.icon, "size-3.5")}
+        </span>
+        <span className="flex-1 text-sm font-medium">{category.name}</span>
+        <span className="text-xs tabular-nums text-muted-foreground">
+          {formatILS(spent)}
+          {goal > 0 && (
+            <span className="text-muted-foreground/70"> / {formatILS(goal)}</span>
+          )}
+        </span>
+      </div>
+      {goal > 0 && (
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full transition-all"
+            style={{ width: `${Math.max(pct, spent > 0 ? 4 : 0)}%`, backgroundColor: barColor }}
+          />
+        </div>
+      )}
     </div>
   );
 }

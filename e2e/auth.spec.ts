@@ -48,7 +48,7 @@ test.describe("auth + household onboarding", () => {
 
     // --- Dashboard shows the goals we just set ---
     await expect(page).toHaveURL(/\/dashboard$/);
-    await expect(page.getByText("היעדים שלכם")).toBeVisible();
+    await expect(page.getByText("מול היעדים")).toBeVisible();
     await expect(page.getByText(householdName)).toBeVisible();
 
     // --- Add an expense ---
@@ -59,6 +59,12 @@ test.describe("auth + household onboarding", () => {
     await page.getByLabel("תיאור").fill("קניות בסופר");
     await page.getByRole("button", { name: "שמירה" }).click();
     await expect(page.getByText("קניות בסופר")).toBeVisible();
+
+    // --- Dashboard reflects the new expense ---
+    await page.goto("/dashboard");
+    await expect(page.getByText("התפלגות הוצאות")).toBeVisible();
+    await expect(page.getByText(/120/).first()).toBeVisible();
+    await page.goto("/transactions");
 
     // --- Edit it ---
     await page.getByRole("button", { name: /קניות בסופר/ }).click();
@@ -83,6 +89,6 @@ test.describe("auth + household onboarding", () => {
     await page.getByRole("button", { name: "כניסה" }).click();
 
     await expect(page).toHaveURL(/\/dashboard$/);
-    await expect(page.getByText("היעדים שלכם")).toBeVisible();
+    await expect(page.getByText("מול היעדים")).toBeVisible();
   });
 });
