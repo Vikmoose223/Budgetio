@@ -1,5 +1,11 @@
 import { expect, test, describe } from "vitest";
-import { formatILS, firstOfMonthISO, monthLabel } from "./format";
+import {
+  formatILS,
+  firstOfMonthISO,
+  monthLabel,
+  formatDate,
+  todayISO,
+} from "./format";
 
 describe("formatILS", () => {
   test("formats whole shekels with the ₪ sign", () => {
@@ -35,5 +41,18 @@ describe("monthLabel", () => {
     const label = monthLabel("2026-07-01");
     expect(label).toContain("2026");
     expect(label).toMatch(/יולי/);
+  });
+});
+
+describe("formatDate", () => {
+  test("renders a Hebrew day + month", () => {
+    expect(formatDate("2026-07-07")).toMatch(/יולי/);
+    expect(formatDate("2026-07-07")).toContain("7");
+  });
+});
+
+describe("todayISO", () => {
+  test("returns a YYYY-MM-DD string", () => {
+    expect(todayISO()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });

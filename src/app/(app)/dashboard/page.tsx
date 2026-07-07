@@ -1,10 +1,13 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { InviteCode } from "./invite-code";
 import { categoryIconElement, categoryTintStyle } from "@/lib/categories";
 import { formatILS, firstOfMonthISO, monthLabel } from "@/lib/format";
-import { Users, Target, PiggyBank } from "lucide-react";
+import { Users, Target, PiggyBank, Plus } from "lucide-react";
 
 export default async function DashboardPage() {
   const { supabase, user } = await requireUser();
@@ -141,8 +144,17 @@ export default async function DashboardPage() {
       </div>
 
       <Card className="mt-4">
-        <CardContent className="py-6 text-center text-sm text-muted-foreground">
-          בקרוב: הזנת הוצאות, ייבוא מהבנק ומעקב מול היעדים. 🚧
+        <CardContent className="flex flex-col items-center gap-3 py-6 text-center sm:flex-row sm:justify-between sm:text-right">
+          <p className="text-sm text-muted-foreground">
+            רשמו הוצאות ועקבו אחריהן מול היעדים החודשיים.
+          </p>
+          <Link
+            href="/transactions"
+            className={cn(buttonVariants(), "shrink-0")}
+          >
+            <Plus className="size-4" />
+            הוספת הוצאה
+          </Link>
         </CardContent>
       </Card>
     </div>

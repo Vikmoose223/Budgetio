@@ -27,6 +27,25 @@ export function firstOfMonthISO(date: Date = new Date()): string {
   return `${y}-${m}-01`;
 }
 
+/** Today as an ISO date string (YYYY-MM-DD) in local time. */
+export function todayISO(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Short Hebrew date label from an ISO date, e.g. "7 ביולי". */
+export function formatDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const date = new Date(y, (m ?? 1) - 1, d ?? 1);
+  return new Intl.DateTimeFormat("he-IL", {
+    day: "numeric",
+    month: "long",
+  }).format(date);
+}
+
 /** Human month label in Hebrew, e.g. "יולי 2026". */
 export function monthLabel(monthISO: string): string {
   const [y, m] = monthISO.split("-").map(Number);

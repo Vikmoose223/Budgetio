@@ -51,7 +51,29 @@ test.describe("auth + household onboarding", () => {
     await expect(page.getByText("היעדים שלכם")).toBeVisible();
     await expect(page.getByText(householdName)).toBeVisible();
 
+    // --- Add an expense ---
+    await page.getByRole("link", { name: "הוצאות" }).click();
+    await expect(page).toHaveURL(/\/transactions$/);
+    await page.getByRole("button", { name: "הוספת הוצאה" }).click();
+    await page.getByLabel("סכום").fill("120");
+    await page.getByLabel("תיאור").fill("קניות בסופר");
+    await page.getByRole("button", { name: "שמירה" }).click();
+    await expect(page.getByText("קניות בסופר")).toBeVisible();
+
+    // --- Edit it ---
+    await page.getByRole("button", { name: /קניות בסופר/ }).click();
+    await page.getByLabel("תיאור").fill("קניות שבועיות");
+    await page.getByRole("button", { name: "שמירה" }).click();
+    await expect(page.getByText("קניות שבועיות")).toBeVisible();
+    await expect(page.getByText("קניות בסופר")).toHaveCount(0);
+
+    // --- Delete it ---
+    await page.getByRole("button", { name: /קניות שבועיות/ }).click();
+    await page.getByRole("button", { name: "מחיקה" }).click();
+    await expect(page.getByText("קניות שבועיות")).toHaveCount(0);
+
     // --- Sign out ---
+    await page.goto("/dashboard");
     await page.getByRole("button", { name: "יציאה" }).click();
     await expect(page).toHaveURL(/\/login$/);
 
