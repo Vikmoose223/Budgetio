@@ -27,6 +27,7 @@ export type Database = {
           color: string | null;
           kind: "expense" | "saving";
           sort_order: number;
+          monthly_goal: number;
           created_at: Timestamp;
         };
         Insert: {
@@ -37,6 +38,7 @@ export type Database = {
           color?: string | null;
           kind?: "expense" | "saving";
           sort_order?: number;
+          monthly_goal?: number;
           created_at?: Timestamp;
         };
         Update: {
@@ -47,6 +49,7 @@ export type Database = {
           color?: string | null;
           kind?: "expense" | "saving";
           sort_order?: number;
+          monthly_goal?: number;
           created_at?: Timestamp;
         };
         Relationships: [];

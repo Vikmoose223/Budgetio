@@ -8,7 +8,7 @@ import {
   categoryIconElement,
   categoryTintStyle,
 } from "@/lib/categories";
-import { addMonths, monthLabel, formatILS } from "@/lib/format";
+import { formatILS } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,14 +20,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import {
-  Plus,
-  ChevronUp,
-  ChevronDown,
-  Loader2,
-  Trash2,
-  CalendarPlus,
-} from "lucide-react";
+import { Plus, ChevronUp, ChevronDown, Loader2, Trash2 } from "lucide-react";
 
 type Cat = {
   id: string;
@@ -54,16 +47,13 @@ const COLOR_CHOICES = [
 
 export function CategoriesManager({
   householdId,
-  month,
   categories,
 }: {
   householdId: string;
-  month: string;
   categories: Cat[];
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState<Cat | "new" | null>(null);
-  const [copying, setCopying] = useState(false);
 
   const expense = categories.filter((c) => c.kind === "expense");
   const saving = categories.filter((c) => c.kind === "saving");
@@ -81,43 +71,8 @@ export function CategoriesManager({
     router.refresh();
   }
 
-  async function copyGoalsToNextMonth() {
-    const next = addMonths(month, 1);
-    const rows = categories
-      .filter((c) => c.goal > 0)
-      .map((c) => ({
-        household_id: householdId,
-        category_id: c.id,
-        month: next,
-        target_amount: c.goal,
-      }));
-    if (rows.length === 0) return toast.error("אין יעדים להעתיק.");
-    setCopying(true);
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("budget_goals")
-      .upsert(rows, { onConflict: "category_id,month" });
-    setCopying(false);
-    if (error) return toast.error("ההעתקה נכשלה.");
-    toast.success(`היעדים הועתקו ל${monthLabel(next)}`);
-  }
-
   return (
     <div className="flex flex-col gap-6">
-      <Button
-        variant="outline"
-        onClick={copyGoalsToNextMonth}
-        disabled={copying}
-        className="self-start"
-      >
-        {copying ? (
-          <Loader2 className="size-4 animate-spin" />
-        ) : (
-          <CalendarPlus className="size-4" />
-        )}
-        העתקת היעדים לחודש הבא
-      </Button>
-
       <Section title="הוצאות">
         {expense.map((c, i) => (
           <Row
@@ -152,7 +107,6 @@ export function CategoriesManager({
       {editing !== null && (
         <CategoryDialog
           householdId={householdId}
-          month={month}
           categories={categories}
           initial={editing}
           onClose={() => setEditing(null)}
@@ -228,13 +182,11 @@ function Row({
 
 function CategoryDialog({
   householdId,
-  month,
   categories,
   initial,
   onClose,
 }: {
   householdId: string;
-  month: string;
   categories: Cat[];
   initial: Cat | "new";
   onClose: () => void;
@@ -256,47 +208,24 @@ function CategoryDialog({
     const supabase = createClient();
     const goalAmount = parseFloat(goal || "0") || 0;
     try {
-      let categoryId = cat?.id;
       if (isNew) {
         const maxSort = Math.max(0, ...categories.map((c) => c.sort_order));
-        const { data, error } = await supabase
-          .from("categories")
-          .insert({
-            household_id: householdId,
-            name: name.trim(),
-            icon,
-            color,
-            kind,
-            sort_order: maxSort + 1,
-          })
-          .select("id")
-          .single();
+        const { error } = await supabase.from("categories").insert({
+          household_id: householdId,
+          name: name.trim(),
+          icon,
+          color,
+          kind,
+          sort_order: maxSort + 1,
+          monthly_goal: goalAmount,
+        });
         if (error) throw error;
-        categoryId = data.id;
       } else {
         const { error } = await supabase
           .from("categories")
-          .update({ name: name.trim(), icon, color, kind })
+          .update({ name: name.trim(), icon, color, kind, monthly_goal: goalAmount })
           .eq("id", cat!.id);
         if (error) throw error;
-      }
-
-      if (goalAmount > 0) {
-        await supabase.from("budget_goals").upsert(
-          {
-            household_id: householdId,
-            category_id: categoryId!,
-            month,
-            target_amount: goalAmount,
-          },
-          { onConflict: "category_id,month" },
-        );
-      } else if (!isNew) {
-        await supabase
-          .from("budget_goals")
-          .delete()
-          .eq("category_id", cat!.id)
-          .eq("month", month);
       }
 
       toast.success(isNew ? "הקטגוריה נוספה" : "הקטגוריה עודכנה");

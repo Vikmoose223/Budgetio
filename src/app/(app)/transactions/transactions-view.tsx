@@ -1,8 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -14,7 +16,7 @@ import { ExpenseForm, type Category, type ExpenseValues } from "./expense-form";
 import { categoryIconElement, categoryTintStyle } from "@/lib/categories";
 import { formatILS, formatDate } from "@/lib/format";
 import { toast } from "sonner";
-import { Plus, Receipt } from "lucide-react";
+import { Plus, Receipt, Search } from "lucide-react";
 
 type Txn = {
   id: string;
@@ -50,16 +52,19 @@ export function TransactionsView({
   userId,
   categories,
   initial,
+  filter,
 }: {
   householdId: string;
   userId: string;
   categories: Category[];
   initial: Txn[];
+  filter?: { label: string } | null;
 }) {
   const [txns, setTxns] = useState<Txn[]>(initial);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Txn | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [query, setQuery] = useState("");
 
   const catById = useMemo(
     () => new Map(categories.map((c) => [c.id, c])),
@@ -141,10 +146,20 @@ export function TransactionsView({
     }
   }
 
-  const total = txns.reduce((s, t) => s + Number(t.amount), 0);
+  // Client-side text search over merchant/description.
+  const q = query.trim().toLowerCase();
+  const visible = q
+    ? txns.filter(
+        (t) =>
+          (t.description ?? "").toLowerCase().includes(q) ||
+          (t.merchant ?? "").toLowerCase().includes(q),
+      )
+    : txns;
+
+  const total = visible.reduce((s, t) => s + Number(t.amount), 0);
 
   // Group by date (txns are already sorted date-desc, so Map keeps that order).
-  const groups = groupByDate(txns);
+  const groups = groupByDate(visible);
 
   return (
     <div className="mx-auto w-full max-w-2xl px-5 py-8 sm:px-6">
@@ -152,7 +167,7 @@ export function TransactionsView({
         <div>
           <h1 className="text-2xl font-bold tracking-tight">הוצאות</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            {txns.length} רשומות · סה״כ {formatILS(total)}
+            {visible.length} רשומות · סה״כ {formatILS(total)}
           </p>
         </div>
         <Button onClick={openAdd}>
@@ -161,8 +176,38 @@ export function TransactionsView({
         </Button>
       </header>
 
+      {filter && (
+        <div className="mt-4 flex items-center gap-2">
+          <span className="inline-flex items-center rounded-full bg-accent px-3 py-1 text-sm text-accent-foreground">
+            {filter.label}
+          </span>
+          <Link
+            href="/transactions"
+            className="text-sm text-muted-foreground hover:text-foreground"
+          >
+            הצג הכול
+          </Link>
+        </div>
+      )}
+
+      {txns.length > 0 && (
+        <div className="relative mt-4">
+          <Search className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="חיפוש לפי תיאור או בית עסק"
+            className="pr-9"
+          />
+        </div>
+      )}
+
       {txns.length === 0 ? (
         <EmptyState onAdd={openAdd} />
+      ) : visible.length === 0 ? (
+        <p className="mt-10 text-center text-sm text-muted-foreground">
+          לא נמצאו תוצאות
+        </p>
       ) : (
         <div className="mt-6 flex flex-col gap-5">
           {groups.map(([date, items]) => (

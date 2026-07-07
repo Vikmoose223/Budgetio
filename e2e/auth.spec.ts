@@ -108,6 +108,19 @@ test.describe("auth + household onboarding", () => {
     await page.getByRole("button", { name: "שמירה" }).click();
     await expect(page.getByText(/2,500/).first()).toBeVisible();
 
+    // --- Category drill-down ---
+    await page.goto("/dashboard");
+    await page.getByRole("link", { name: /מזון/ }).first().click();
+    await expect(page).toHaveURL(/\/transactions\?category=/);
+    await expect(page.getByText("הצג הכול")).toBeVisible();
+
+    // --- Recurring page loads ---
+    await page.getByRole("link", { name: "קבועות" }).click();
+    await expect(page).toHaveURL(/\/recurring$/);
+    await expect(
+      page.getByRole("heading", { name: "הוצאות קבועות" }),
+    ).toBeVisible();
+
     // --- Sign out ---
     await page.goto("/dashboard");
     await page.getByRole("button", { name: "יציאה" }).click();

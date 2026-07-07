@@ -7,14 +7,9 @@ import { cn } from "@/lib/utils";
 import { InviteCode } from "@/components/invite-code";
 import { SpendingDonut } from "./spending-donut";
 import { TrendChart } from "./trend-chart";
+import { MonthPicker } from "./month-picker";
 import { categoryIconElement, categoryTintStyle } from "@/lib/categories";
-import {
-  formatILS,
-  firstOfMonthISO,
-  addMonths,
-  monthRange,
-  monthLabel,
-} from "@/lib/format";
+import { formatILS, firstOfMonthISO, addMonths, monthRange } from "@/lib/format";
 import { summarizeMonth, monthlyExpenseTrend } from "@/lib/aggregate";
 import { generateInsights, type Insight } from "@/lib/insights";
 import {
@@ -59,7 +54,6 @@ export default async function DashboardPage({
     { data: household },
     { data: members },
     { data: categories },
-    { data: goals },
     { data: monthTxns },
     { data: trendTxns },
   ] = await Promise.all([
@@ -67,14 +61,9 @@ export default async function DashboardPage({
     supabase.from("profiles").select("id, display_name").eq("household_id", householdId),
     supabase
       .from("categories")
-      .select("id, name, icon, color, kind")
+      .select("id, name, icon, color, kind, monthly_goal")
       .eq("household_id", householdId)
       .order("sort_order"),
-    supabase
-      .from("budget_goals")
-      .select("category_id, target_amount")
-      .eq("household_id", householdId)
-      .eq("month", month),
     supabase
       .from("transactions")
       .select("category_id, amount, occurred_on")
@@ -91,8 +80,9 @@ export default async function DashboardPage({
 
   if (!categories || categories.length === 0) redirect("/onboarding");
 
+  // Goals are a fixed value per category (same every month).
   const goalByCategory = new Map(
-    (goals ?? []).map((g) => [g.category_id, Number(g.target_amount)]),
+    categories.map((c) => [c.id, Number(c.monthly_goal)]),
   );
   const summary = summarizeMonth(categories, monthTxns ?? [], goalByCategory);
   const trend = monthlyExpenseTrend(month, 6, categories, trendTxns ?? []);
@@ -136,9 +126,7 @@ export default async function DashboardPage({
           >
             <ChevronRight className="size-4" />
           </Link>
-          <span className="min-w-28 text-center text-sm font-semibold">
-            {monthLabel(month)}
-          </span>
+          <MonthPicker month={month} />
           <Link
             href={`/dashboard?month=${addMonths(month, 1).slice(0, 7)}`}
             className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
@@ -205,12 +193,17 @@ export default async function DashboardPage({
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             {expenseRows.map((row) => (
-              <CategoryProgress key={row.category.id} row={row} />
+              <CategoryProgress key={row.category.id} row={row} month={month} />
             ))}
             {savingRows.length > 0 && (
               <div className="mt-1 border-t border-border pt-3">
                 {savingRows.map((row) => (
-                  <CategoryProgress key={row.category.id} row={row} saving />
+                  <CategoryProgress
+                    key={row.category.id}
+                    row={row}
+                    month={month}
+                    saving
+                  />
                 ))}
               </div>
             )}
@@ -370,9 +363,15 @@ function InsightRow({ insight }: { insight: Insight }) {
 
 function CategoryProgress({
   row,
+  month,
   saving,
 }: {
-  row: { category: { name: string; icon: string | null; color: string | null }; spent: number; goal: number };
+  row: {
+    category: { id: string; name: string; icon: string | null; color: string | null };
+    spent: number;
+    goal: number;
+  };
+  month: string;
   saving?: boolean;
 }) {
   const { category, spent, goal } = row;
@@ -385,7 +384,10 @@ function CategoryProgress({
       : `var(--${category.color ?? "chart-1"})`;
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <Link
+      href={`/transactions?category=${category.id}&month=${month.slice(0, 7)}`}
+      className="flex flex-col gap-1.5 rounded-lg p-1 transition-colors hover:bg-accent/50"
+    >
       <div className="flex items-center gap-2.5">
         <span
           className="flex size-7 shrink-0 items-center justify-center rounded-md"
@@ -409,6 +411,6 @@ function CategoryProgress({
           />
         </div>
       )}
-    </div>
+    </Link>
   );
 }

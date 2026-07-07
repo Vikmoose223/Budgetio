@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
-import { firstOfMonthISO, monthLabel } from "@/lib/format";
 import { CategoriesManager } from "./categories-manager";
 import { ChevronRight } from "lucide-react";
 
@@ -15,27 +14,16 @@ export default async function CategoriesSettingsPage() {
     .single();
   if (!profile?.household_id) redirect("/onboarding");
   const householdId = profile.household_id;
-  const month = firstOfMonthISO();
 
-  const [{ data: categories }, { data: goals }] = await Promise.all([
-    supabase
-      .from("categories")
-      .select("id, name, icon, color, kind, sort_order")
-      .eq("household_id", householdId)
-      .order("sort_order"),
-    supabase
-      .from("budget_goals")
-      .select("category_id, target_amount")
-      .eq("household_id", householdId)
-      .eq("month", month),
-  ]);
+  const { data: categories } = await supabase
+    .from("categories")
+    .select("id, name, icon, color, kind, sort_order, monthly_goal")
+    .eq("household_id", householdId)
+    .order("sort_order");
 
-  const goalByCat = new Map(
-    (goals ?? []).map((g) => [g.category_id, Number(g.target_amount)]),
-  );
   const withGoals = (categories ?? []).map((c) => ({
     ...c,
-    goal: goalByCat.get(c.id) ?? 0,
+    goal: Number(c.monthly_goal),
   }));
 
   return (
@@ -51,16 +39,12 @@ export default async function CategoriesSettingsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">קטגוריות ויעדים</h1>
           <p className="text-sm text-muted-foreground">
-            יעדים לחודש {monthLabel(month)}
+            היעד החודשי זהה בכל החודשים
           </p>
         </div>
       </div>
 
-      <CategoriesManager
-        householdId={householdId}
-        month={month}
-        categories={withGoals}
-      />
+      <CategoriesManager householdId={householdId} categories={withGoals} />
     </div>
   );
 }

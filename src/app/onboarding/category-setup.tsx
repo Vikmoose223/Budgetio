@@ -10,7 +10,6 @@ import {
   categoryTintStyle,
   type CategoryKind,
 } from "@/lib/categories";
-import { firstOfMonthISO } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -92,41 +91,18 @@ export function CategorySetup({ householdId }: { householdId: string }) {
     const supabase = createClient();
 
     try {
-      const { data: inserted, error: catErr } = await supabase
-        .from("categories")
-        .insert(
-          chosen.map((r, i) => ({
-            household_id: householdId,
-            name: r.name.trim(),
-            icon: r.icon,
-            color: r.color,
-            kind: r.kind,
-            sort_order: i,
-          })),
-        )
-        .select("id, name");
-      if (catErr) throw catErr;
-
-      // Map inserted ids back to the amounts the user typed (keyed by name).
-      const amountByName = new Map(
-        chosen.map((r) => [r.name.trim(), parseFloat(r.amount || "0") || 0]),
-      );
-      const month = firstOfMonthISO();
-      const goals = (inserted ?? [])
-        .map((cat) => ({
+      const { error: catErr } = await supabase.from("categories").insert(
+        chosen.map((r, i) => ({
           household_id: householdId,
-          category_id: cat.id,
-          month,
-          target_amount: amountByName.get(cat.name) ?? 0,
-        }))
-        .filter((g) => g.target_amount > 0);
-
-      if (goals.length > 0) {
-        const { error: goalErr } = await supabase
-          .from("budget_goals")
-          .insert(goals);
-        if (goalErr) throw goalErr;
-      }
+          name: r.name.trim(),
+          icon: r.icon,
+          color: r.color,
+          kind: r.kind,
+          sort_order: i,
+          monthly_goal: parseFloat(r.amount || "0") || 0,
+        })),
+      );
+      if (catErr) throw catErr;
 
       router.push("/dashboard");
       router.refresh();

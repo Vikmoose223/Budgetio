@@ -1,8 +1,13 @@
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
+import { monthRange, monthLabel } from "@/lib/format";
 import { TransactionsView } from "./transactions-view";
 
-export default async function TransactionsPage() {
+export default async function TransactionsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ category?: string; month?: string }>;
+}) {
   const { supabase, user } = await requireUser();
 
   const { data: profile } = await supabase
@@ -13,22 +18,45 @@ export default async function TransactionsPage() {
   if (!profile?.household_id) redirect("/onboarding");
   const householdId = profile.household_id;
 
-  const [{ data: categories }, { data: transactions }] = await Promise.all([
-    supabase
-      .from("categories")
-      .select("id, name, icon, color, kind")
-      .eq("household_id", householdId)
-      .order("sort_order"),
-    supabase
-      .from("transactions")
-      .select("id, category_id, occurred_on, amount, description, merchant, source")
-      .eq("household_id", householdId)
-      .order("occurred_on", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(300),
-  ]);
+  const sp = await searchParams;
+  const monthISO = /^\d{4}-\d{2}$/.test(sp.month ?? "")
+    ? `${sp.month}-01`
+    : null;
 
+  const { data: categories } = await supabase
+    .from("categories")
+    .select("id, name, icon, color, kind")
+    .eq("household_id", householdId)
+    .order("sort_order");
   if (!categories || categories.length === 0) redirect("/onboarding");
+
+  let query = supabase
+    .from("transactions")
+    .select("id, category_id, occurred_on, amount, description, merchant, source")
+    .eq("household_id", householdId)
+    .order("occurred_on", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(500);
+
+  const filterCategory = sp.category
+    ? categories.find((c) => c.id === sp.category)
+    : undefined;
+  if (filterCategory) query = query.eq("category_id", filterCategory.id);
+  if (monthISO) {
+    const { start, endExclusive } = monthRange(monthISO);
+    query = query.gte("occurred_on", start).lt("occurred_on", endExclusive);
+  }
+
+  const { data: transactions } = await query;
+
+  const filter =
+    filterCategory || monthISO
+      ? {
+          label: [filterCategory?.name, monthISO ? monthLabel(monthISO) : null]
+            .filter(Boolean)
+            .join(" · "),
+        }
+      : null;
 
   return (
     <TransactionsView
@@ -36,6 +64,7 @@ export default async function TransactionsPage() {
       userId={user.id}
       categories={categories}
       initial={transactions ?? []}
+      filter={filter}
     />
   );
 }
