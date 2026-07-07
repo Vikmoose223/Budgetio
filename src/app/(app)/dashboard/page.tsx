@@ -9,7 +9,13 @@ import { SpendingDonut } from "./spending-donut";
 import { TrendChart } from "./trend-chart";
 import { MonthNav } from "@/components/month-nav";
 import { CategoryBreakdown } from "./category-breakdown";
-import { formatILS, firstOfMonthISO, addMonths, periodRange } from "@/lib/format";
+import {
+  formatILS,
+  todayISO,
+  budgetMonthOf,
+  addMonths,
+  periodRange,
+} from "@/lib/format";
 import { summarizeMonth, monthlyExpenseTrend } from "@/lib/aggregate";
 import { generateInsights, type Insight } from "@/lib/insights";
 import {
@@ -24,9 +30,11 @@ import {
   Lightbulb,
 } from "lucide-react";
 
-function normalizeMonth(raw: string | undefined): string {
+// A valid ?month=YYYY-MM wins; otherwise default to the budget period that
+// contains today (which, with a billing-cycle start day, may be last month).
+function resolveMonth(raw: string | undefined, startDay: number): string {
   if (raw && /^\d{4}-\d{2}(-01)?$/.test(raw)) return `${raw.slice(0, 7)}-01`;
-  return firstOfMonthISO();
+  return budgetMonthOf(todayISO(), startDay);
 }
 
 export default async function DashboardPage({
@@ -44,14 +52,13 @@ export default async function DashboardPage({
   if (!profile?.household_id) redirect("/onboarding");
   const householdId = profile.household_id;
 
-  const month = normalizeMonth((await searchParams).month);
-
   const { data: household } = await supabase
     .from("households")
     .select("name, invite_code, month_start_day")
     .eq("id", householdId)
     .single();
   const startDay = household?.month_start_day ?? 1;
+  const month = resolveMonth((await searchParams).month, startDay);
   const { start, endExclusive } = periodRange(month, startDay);
   const trendStart = periodRange(addMonths(month, -5), startDay).start;
 

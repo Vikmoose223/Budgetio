@@ -5,7 +5,30 @@ import {
   monthLabel,
   formatDate,
   todayISO,
+  periodRange,
+  budgetMonthOf,
 } from "./format";
+
+describe("periodRange / budgetMonthOf (billing cycle)", () => {
+  test("startDay=1 behaves like a calendar month", () => {
+    expect(periodRange("2026-07-01", 1)).toEqual({
+      start: "2026-07-01",
+      endExclusive: "2026-08-01",
+    });
+    expect(budgetMonthOf("2026-07-08", 1)).toBe("2026-07-01");
+  });
+
+  test("a billing start day shifts the period", () => {
+    expect(periodRange("2026-06-01", 10)).toEqual({
+      start: "2026-06-10",
+      endExclusive: "2026-07-10",
+    });
+    // Before the 10th → the day belongs to the previous month's budget period.
+    expect(budgetMonthOf("2026-07-08", 10)).toBe("2026-06-01");
+    // On/after the 10th → the current month's period.
+    expect(budgetMonthOf("2026-07-15", 10)).toBe("2026-07-01");
+  });
+});
 
 describe("formatILS", () => {
   test("formats whole shekels with the ₪ sign", () => {

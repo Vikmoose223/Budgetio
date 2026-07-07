@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
-import { firstOfMonthISO, periodRange } from "@/lib/format";
+import { todayISO, budgetMonthOf, periodRange } from "@/lib/format";
 import { TransactionsView } from "./transactions-view";
 
 export default async function TransactionsPage({
@@ -19,11 +19,6 @@ export default async function TransactionsPage({
   const householdId = profile.household_id;
 
   const sp = await searchParams;
-  // Always scope to a budget month (default: current) so the total matches the
-  // dashboard. Uses the household's billing-cycle start day.
-  const month = /^\d{4}-\d{2}$/.test(sp.month ?? "")
-    ? `${sp.month}-01`
-    : firstOfMonthISO();
 
   const [{ data: categories }, { data: household }] = await Promise.all([
     supabase
@@ -39,7 +34,15 @@ export default async function TransactionsPage({
   ]);
   if (!categories || categories.length === 0) redirect("/onboarding");
 
-  const { start, endExclusive } = periodRange(month, household?.month_start_day ?? 1);
+  // Always scope to a budget month (default: the period containing today, which
+  // with a billing-cycle start day may be last calendar month) so the total
+  // matches the dashboard.
+  const startDay = household?.month_start_day ?? 1;
+  const month = /^\d{4}-\d{2}$/.test(sp.month ?? "")
+    ? `${sp.month}-01`
+    : budgetMonthOf(todayISO(), startDay);
+
+  const { start, endExclusive } = periodRange(month, startDay);
 
   const wantUncategorized = sp.category === "none";
   const filterCategory =
