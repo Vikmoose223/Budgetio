@@ -1,0 +1,42 @@
+import type { Metadata, Viewport } from "next";
+import { Heebo } from "next/font/google";
+import "./globals.css";
+
+// Heebo carries full Hebrew + Latin glyphs, so the whole RTL UI shares one font.
+const heebo = Heebo({
+  variable: "--font-heebo",
+  subsets: ["hebrew", "latin"],
+  display: "swap",
+});
+
+export const metadata: Metadata = {
+  title: {
+    default: "תקציב זוגי",
+    template: "%s · תקציב זוגי",
+  },
+  description: "מעקב הוצאות, יעדים ותובנות לזוג — פשוט וברור.",
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#1a1f1d" },
+  ],
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html
+      lang="he"
+      dir="rtl"
+      className={`${heebo.variable} h-full antialiased`}
+      suppressHydrationWarning
+    >
+      <body className="min-h-full flex flex-col">{children}</body>
+    </html>
+  );
+}
