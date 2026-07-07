@@ -37,27 +37,30 @@ test.describe("auth + household onboarding", () => {
 
     await expect(page).toHaveURL(/\/onboarding$/);
 
-    // --- Create household ---
+    // --- Create household → advances to category setup ---
     await page.getByLabel("שם משק הבית").fill(householdName);
     await page.getByRole("button", { name: "יצירת משק בית" }).click();
 
+    // --- Category & goal setup ---
+    await expect(page.getByText("נגדיר את התקציב")).toBeVisible();
+    await page.getByLabel("יעד חודשי עבור מזון").fill("2000");
+    await page.getByRole("button", { name: /סיום/ }).click();
+
+    // --- Dashboard shows the goals we just set ---
     await expect(page).toHaveURL(/\/dashboard$/);
-    await expect(
-      page.getByRole("heading", { name: householdName }),
-    ).toBeVisible();
+    await expect(page.getByText("היעדים שלכם")).toBeVisible();
+    await expect(page.getByText(householdName)).toBeVisible();
 
     // --- Sign out ---
     await page.getByRole("button", { name: "יציאה" }).click();
     await expect(page).toHaveURL(/\/login$/);
 
-    // --- Sign back in → lands straight on the dashboard ---
+    // --- Sign back in → straight to the dashboard (onboarding done) ---
     await page.getByLabel("אימייל").fill(email);
     await page.getByLabel("סיסמה").fill(password);
     await page.getByRole("button", { name: "כניסה" }).click();
 
     await expect(page).toHaveURL(/\/dashboard$/);
-    await expect(
-      page.getByRole("heading", { name: householdName }),
-    ).toBeVisible();
+    await expect(page.getByText("היעדים שלכם")).toBeVisible();
   });
 });

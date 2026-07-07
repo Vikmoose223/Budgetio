@@ -15,4 +15,11 @@ test("landing page loads, is RTL, and links to login", async ({ page }) => {
     "href",
     "/login",
   );
+
+  // Mobile-friendliness: the page must not scroll horizontally (this test also
+  // runs under the Pixel 7 viewport via the "mobile" Playwright project).
+  const noOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+  );
+  expect(noOverflow).toBe(true);
 });

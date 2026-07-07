@@ -39,7 +39,9 @@ export function OnboardingForm() {
         });
         if (error) throw error;
       }
-      router.push("/dashboard");
+      // Re-enter onboarding: a new household advances to category setup,
+      // while joining one that's already set up will redirect to the dashboard.
+      router.push("/onboarding");
       router.refresh();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
