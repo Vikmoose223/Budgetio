@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Heebo } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
+import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
 // Heebo carries full Hebrew + Latin glyphs, so the whole RTL UI shares one font.
@@ -38,8 +39,15 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col">
-        {children}
-        <Toaster position="top-center" />
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          {children}
+          <Toaster position="top-center" />
+        </ThemeProvider>
       </body>
     </html>
   );

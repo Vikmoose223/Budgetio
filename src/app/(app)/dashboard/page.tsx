@@ -16,6 +16,7 @@ import {
   monthLabel,
 } from "@/lib/format";
 import { summarizeMonth, monthlyExpenseTrend } from "@/lib/aggregate";
+import { generateInsights, type Insight } from "@/lib/insights";
 import {
   Users,
   PiggyBank,
@@ -23,6 +24,11 @@ import {
   ChevronRight,
   ChevronLeft,
   Wallet,
+  ArrowUp,
+  ArrowDown,
+  AlertTriangle,
+  CheckCircle2,
+  Lightbulb,
 } from "lucide-react";
 
 function normalizeMonth(raw: string | undefined): string {
@@ -91,6 +97,15 @@ export default async function DashboardPage({
   const summary = summarizeMonth(categories, monthTxns ?? [], goalByCategory);
   const trend = monthlyExpenseTrend(month, 6, categories, trendTxns ?? []);
 
+  // Previous month's total (the point right before the current one in the trend).
+  const prevExpenseTotal = trend.length >= 2 ? trend[trend.length - 2].total : null;
+  const spendDiff = summary.totalExpenseSpent - (prevExpenseTotal ?? 0);
+  const spendChange =
+    prevExpenseTotal && prevExpenseTotal > 0
+      ? { pct: Math.round((Math.abs(spendDiff) / prevExpenseTotal) * 100), up: spendDiff > 0 }
+      : null;
+  const insights = generateInsights({ summary, prevExpenseTotal });
+
   const donutData = summary.perCategory
     .filter((c) => c.category.kind === "expense" && c.spent > 0)
     .map((c) => ({
@@ -134,12 +149,30 @@ export default async function DashboardPage({
         </div>
       </header>
 
+      {/* Insights */}
+      {insights.length > 0 && (
+        <Card className="mb-4 animate-in fade-in duration-500">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Lightbulb className="size-4 text-primary" />
+              תובנות
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            {insights.map((ins) => (
+              <InsightRow key={ins.id} insight={ins} />
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Summary tiles */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <StatTile
           icon={<Wallet className="size-4" />}
           label="הוצאת החודש"
           value={formatILS(summary.totalExpenseSpent)}
+          change={spendChange}
         />
         <StatTile
           icon={<Wallet className="size-4" />}
@@ -253,11 +286,13 @@ function StatTile({
   label,
   value,
   tone = "muted",
+  change,
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
   tone?: "muted" | "ok" | "danger" | "accent";
+  change?: { pct: number; up: boolean } | null;
 }) {
   const toneClass =
     tone === "danger"
@@ -281,6 +316,54 @@ function StatTile({
       >
         {value}
       </p>
+      {change && (
+        // For spending, up = more spent = worse (red); down = good (green).
+        <p
+          className={cn(
+            "mt-1 flex items-center gap-0.5 text-xs font-medium",
+            change.up ? "text-destructive" : "text-success",
+          )}
+        >
+          {change.up ? (
+            <ArrowUp className="size-3" />
+          ) : (
+            <ArrowDown className="size-3" />
+          )}
+          {change.pct}% מהחודש הקודם
+        </p>
+      )}
+    </div>
+  );
+}
+
+function InsightRow({ insight }: { insight: Insight }) {
+  const { tone } = insight;
+  const chip =
+    tone === "warning"
+      ? "bg-destructive/10 text-destructive"
+      : tone === "success"
+        ? "bg-success/10 text-success"
+        : "bg-primary/10 text-primary";
+  return (
+    <div className="flex items-start gap-3">
+      <span
+        className={cn(
+          "flex size-8 shrink-0 items-center justify-center rounded-lg",
+          chip,
+        )}
+      >
+        {tone === "warning" ? (
+          <AlertTriangle className="size-4" />
+        ) : tone === "success" ? (
+          <CheckCircle2 className="size-4" />
+        ) : (
+          <Lightbulb className="size-4" />
+        )}
+      </span>
+      <div className="min-w-0">
+        <p className="text-sm font-semibold">{insight.title}</p>
+        <p className="text-sm text-muted-foreground">{insight.text}</p>
+      </div>
     </div>
   );
 }

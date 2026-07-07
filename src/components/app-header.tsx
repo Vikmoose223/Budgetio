@@ -2,6 +2,7 @@ import Link from "next/link";
 import { PiggyBank, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DesktopNav } from "@/components/nav";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 /**
  * Top bar for authenticated pages: brand + desktop nav on one side,
@@ -23,12 +24,15 @@ export function AppHeader() {
           </Link>
           <DesktopNav />
         </div>
-        <form action="/auth/signout" method="post">
-          <Button type="submit" variant="ghost" size="sm">
-            <LogOut className="size-4" />
-            <span className="hidden sm:inline">יציאה</span>
-          </Button>
-        </form>
+        <div className="flex items-center gap-1">
+          <ThemeToggle />
+          <form action="/auth/signout" method="post">
+            <Button type="submit" variant="ghost" size="sm">
+              <LogOut className="size-4" />
+              <span className="hidden sm:inline">יציאה</span>
+            </Button>
+          </form>
+        </div>
       </div>
     </header>
   );

@@ -51,6 +51,10 @@ test.describe("auth + household onboarding", () => {
     await expect(page.getByText("מול היעדים")).toBeVisible();
     await expect(page.getByText(householdName)).toBeVisible();
 
+    // --- Dark mode toggle ---
+    await page.getByRole("button", { name: "החלפת מצב תצוגה" }).click();
+    await expect(page.locator("html")).toHaveClass(/dark/);
+
     // --- Add an expense ---
     await page.getByRole("link", { name: "הוצאות" }).click();
     await expect(page).toHaveURL(/\/transactions$/);
