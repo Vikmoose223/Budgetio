@@ -7,9 +7,9 @@ export type Database = {
   public: {
     Tables: {
       households: {
-        Row: { id: string; name: string; invite_code: string; created_at: Timestamp };
-        Insert: { id?: string; name: string; invite_code?: string; created_at?: Timestamp };
-        Update: { id?: string; name?: string; invite_code?: string; created_at?: Timestamp };
+        Row: { id: string; name: string; invite_code: string; month_start_day: number; created_at: Timestamp };
+        Insert: { id?: string; name: string; invite_code?: string; month_start_day?: number; created_at?: Timestamp };
+        Update: { id?: string; name?: string; invite_code?: string; month_start_day?: number; created_at?: Timestamp };
         Relationships: [];
       };
       profiles: {

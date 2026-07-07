@@ -4,7 +4,12 @@ import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { workbookToMatrix } from "@/lib/import/read-workbook";
-import { parseRows, externalId, type ParsedRow } from "@/lib/import/parse";
+import {
+  parseRows,
+  externalId,
+  foreignLabel,
+  type ParsedRow,
+} from "@/lib/import/parse";
 import {
   suggestCategory,
   type NamedCategory,
@@ -141,7 +146,11 @@ export function ImportView({
         category_id: r.categoryId,
         occurred_on: r.parsed.occurredOn,
         amount: r.parsed.amount,
-        description: r.parsed.merchant,
+        // For foreign charges, keep the original amount visible in the title.
+        description:
+          r.parsed.currency && r.parsed.originalAmount
+            ? `${r.parsed.merchant} · ${foreignLabel(r.parsed.currency, r.parsed.originalAmount)}`
+            : r.parsed.merchant,
         merchant: r.parsed.merchant,
         source: "import" as const,
         external_id: r.externalId,
@@ -327,7 +336,14 @@ function ReviewCard({
         </span>
 
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">{parsed.merchant}</p>
+          <p className="truncate text-sm font-medium">
+            {parsed.merchant}
+            {parsed.currency && parsed.originalAmount && (
+              <span className="mr-1.5 rounded bg-accent px-1.5 py-0.5 text-[11px] font-normal text-accent-foreground">
+                {foreignLabel(parsed.currency, parsed.originalAmount)}
+              </span>
+            )}
+          </p>
           <p className="text-xs text-muted-foreground">
             {formatDate(parsed.occurredOn)}
             {parsed.rawCategory ? ` · ${parsed.rawCategory}` : ""}

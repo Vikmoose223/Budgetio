@@ -80,6 +80,27 @@ export function TransactionsView({
     setDialogOpen(true);
   }
 
+  // Ask whether to remember a merchant → category mapping (learned rule).
+  function promptRemember(merchant: string, categoryId: string) {
+    const catName = catById.get(categoryId)?.name ?? "";
+    toast(`לזכור ש"${merchant}" שייך ל"${catName}"?`, {
+      duration: 8000,
+      action: {
+        label: "כן, זכור",
+        onClick: async () => {
+          const supabase = createClient();
+          const { error } = await supabase.from("category_rules").upsert(
+            { household_id: householdId, keyword: merchant, category_id: categoryId },
+            { onConflict: "household_id,keyword" },
+          );
+          toast[error ? "error" : "success"](
+            error ? "שמירת הכלל נכשלה" : "נשמר! נסווג כך אוטומטית בפעם הבאה",
+          );
+        },
+      },
+    });
+  }
+
   async function handleSubmit(v: ExpenseValues) {
     setSubmitting(true);
     const supabase = createClient();
@@ -99,10 +120,18 @@ export function TransactionsView({
           .select(TXN_COLS)
           .single();
         if (error) throw error;
+        const changedCategory =
+          v.categoryId && v.categoryId !== editing.category_id;
+        const merchant = (v.merchant || editing.merchant || "").trim();
         setTxns((prev) =>
           sortByDateDesc(prev.map((t) => (t.id === data.id ? (data as Txn) : t))),
         );
-        toast.success("ההוצאה עודכנה");
+        // Offer to remember this merchant → category for future imports.
+        if (changedCategory && merchant) {
+          promptRemember(merchant, v.categoryId);
+        } else {
+          toast.success("ההוצאה עודכנה");
+        }
       } else {
         const { data, error } = await supabase
           .from("transactions")

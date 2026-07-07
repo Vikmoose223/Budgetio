@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
-import { monthRange, monthLabel } from "@/lib/format";
+import { periodRange, monthLabel } from "@/lib/format";
 import { TransactionsView } from "./transactions-view";
 
 export default async function TransactionsPage({
@@ -43,7 +43,12 @@ export default async function TransactionsPage({
     : undefined;
   if (filterCategory) query = query.eq("category_id", filterCategory.id);
   if (monthISO) {
-    const { start, endExclusive } = monthRange(monthISO);
+    const { data: hh } = await supabase
+      .from("households")
+      .select("month_start_day")
+      .eq("id", householdId)
+      .single();
+    const { start, endExclusive } = periodRange(monthISO, hh?.month_start_day ?? 1);
     query = query.gte("occurred_on", start).lt("occurred_on", endExclusive);
   }
 

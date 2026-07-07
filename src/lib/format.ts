@@ -60,6 +60,29 @@ export function monthRange(monthISO: string): {
   return { start: monthISO, endExclusive: addMonths(monthISO, 1) };
 }
 
+/**
+ * Half-open range for a "budget month" that starts on `startDay` (1..28).
+ * startDay=1 is a normal calendar month. The period labeled (Y,M) runs from
+ * Y-M-startDay to the next month's startDay.
+ */
+export function periodRange(
+  monthISO: string,
+  startDay: number,
+): { start: string; endExclusive: string } {
+  const day = String(Math.min(Math.max(startDay, 1), 28)).padStart(2, "0");
+  const [y, m] = monthISO.split("-");
+  const next = addMonths(monthISO, 1);
+  const [ny, nm] = next.split("-");
+  return { start: `${y}-${m}-${day}`, endExclusive: `${ny}-${nm}-${day}` };
+}
+
+/** Which budget-month (YYYY-MM-01) a date falls into, given the start day. */
+export function budgetMonthOf(dateISO: string, startDay: number): string {
+  const [y, m, d] = dateISO.split("-").map(Number);
+  const label = `${y}-${String(m).padStart(2, "0")}-01`;
+  return d >= startDay ? label : addMonths(label, -1);
+}
+
 /** Human month label in Hebrew, e.g. "יולי 2026". */
 export function monthLabel(monthISO: string): string {
   const [y, m] = monthISO.split("-").map(Number);

@@ -18,7 +18,7 @@ export default async function SettingsPage() {
   const householdId = profile.household_id;
 
   const [{ data: household }, { data: members }] = await Promise.all([
-    supabase.from("households").select("name, invite_code").eq("id", householdId).single(),
+    supabase.from("households").select("name, invite_code, month_start_day").eq("id", householdId).single(),
     supabase.from("profiles").select("id, display_name").eq("household_id", householdId),
   ]);
 
@@ -62,6 +62,7 @@ export default async function SettingsPage() {
             <HouseholdSection
               householdId={householdId}
               initialName={household?.name ?? ""}
+              initialStartDay={household?.month_start_day ?? 1}
               inviteCode={household?.invite_code ?? ""}
               members={members ?? []}
               currentUserId={user.id}

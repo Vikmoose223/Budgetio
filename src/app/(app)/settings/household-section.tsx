@@ -29,18 +29,21 @@ function newInviteCode() {
 export function HouseholdSection({
   householdId,
   initialName,
+  initialStartDay,
   inviteCode,
   members,
   currentUserId,
 }: {
   householdId: string;
   initialName: string;
+  initialStartDay: number;
   inviteCode: string;
   members: Member[];
   currentUserId: string;
 }) {
   const router = useRouter();
   const [name, setName] = useState(initialName);
+  const [startDay, setStartDay] = useState(initialStartDay);
   const [code, setCode] = useState(inviteCode);
   const [busy, setBusy] = useState(false);
   const [leaving, setLeaving] = useState(false);
@@ -50,11 +53,11 @@ export function HouseholdSection({
     const supabase = createClient();
     const { error } = await supabase
       .from("households")
-      .update({ name: name.trim() || "משק בית" })
+      .update({ name: name.trim() || "משק בית", month_start_day: startDay })
       .eq("id", householdId);
     setBusy(false);
     if (error) return toast.error("שמירה נכשלה");
-    toast.success("שם משק הבית עודכן");
+    toast.success("ההגדרות עודכנו");
     router.refresh();
   }
 
@@ -96,9 +99,30 @@ export function HouseholdSection({
             onChange={(e) => setName(e.target.value)}
           />
         </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="startDay">היום שבו מתחיל החודש התקציבי</Label>
+          <select
+            id="startDay"
+            value={startDay}
+            onChange={(e) => setStartDay(Number(e.target.value))}
+            className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30"
+          >
+            {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+              <option key={d} value={d}>
+                {d === 1 ? "1 (חודש קלנדרי)" : d}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-muted-foreground">
+            למשל אם כרטיס האשראי מחייב ב-10 לחודש, בחרו 10.
+          </p>
+        </div>
         <Button
           onClick={rename}
-          disabled={busy || name.trim() === initialName.trim()}
+          disabled={
+            busy ||
+            (name.trim() === initialName.trim() && startDay === initialStartDay)
+          }
           className="self-start"
         >
           {busy && <Loader2 className="size-4 animate-spin" />}

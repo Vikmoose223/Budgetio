@@ -1,4 +1,4 @@
-import { addMonths, monthLabel } from "./format";
+import { addMonths, monthLabel, budgetMonthOf } from "./format";
 
 export type AggCategory = {
   id: string;
@@ -89,6 +89,7 @@ export function monthlyExpenseTrend(
   count: number,
   categories: AggCategory[],
   transactions: AggTxn[],
+  startDay = 1,
 ): TrendPoint[] {
   const savingIds = new Set(
     categories.filter((c) => c.kind === "saving").map((c) => c.id),
@@ -103,7 +104,7 @@ export function monthlyExpenseTrend(
 
   for (const t of transactions) {
     if (t.category_id && savingIds.has(t.category_id)) continue;
-    const month = `${t.occurred_on.slice(0, 7)}-01`;
+    const month = budgetMonthOf(t.occurred_on, startDay);
     const idx = indexByMonth.get(month);
     if (idx !== undefined) points[idx].total += Number(t.amount);
   }

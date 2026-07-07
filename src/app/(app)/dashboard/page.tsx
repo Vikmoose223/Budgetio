@@ -9,7 +9,7 @@ import { SpendingDonut } from "./spending-donut";
 import { TrendChart } from "./trend-chart";
 import { MonthPicker } from "./month-picker";
 import { categoryIconElement, categoryTintStyle } from "@/lib/categories";
-import { formatILS, firstOfMonthISO, addMonths, monthRange } from "@/lib/format";
+import { formatILS, firstOfMonthISO, addMonths, periodRange } from "@/lib/format";
 import { summarizeMonth, monthlyExpenseTrend } from "@/lib/aggregate";
 import { generateInsights, type Insight } from "@/lib/insights";
 import {
@@ -47,17 +47,22 @@ export default async function DashboardPage({
   const householdId = profile.household_id;
 
   const month = normalizeMonth((await searchParams).month);
-  const { start, endExclusive } = monthRange(month);
-  const trendStart = addMonths(month, -5);
+
+  const { data: household } = await supabase
+    .from("households")
+    .select("name, invite_code, month_start_day")
+    .eq("id", householdId)
+    .single();
+  const startDay = household?.month_start_day ?? 1;
+  const { start, endExclusive } = periodRange(month, startDay);
+  const trendStart = periodRange(addMonths(month, -5), startDay).start;
 
   const [
-    { data: household },
     { data: members },
     { data: categories },
     { data: monthTxns },
     { data: trendTxns },
   ] = await Promise.all([
-    supabase.from("households").select("name, invite_code").eq("id", householdId).single(),
     supabase.from("profiles").select("id, display_name").eq("household_id", householdId),
     supabase
       .from("categories")
@@ -85,7 +90,7 @@ export default async function DashboardPage({
     categories.map((c) => [c.id, Number(c.monthly_goal)]),
   );
   const summary = summarizeMonth(categories, monthTxns ?? [], goalByCategory);
-  const trend = monthlyExpenseTrend(month, 6, categories, trendTxns ?? []);
+  const trend = monthlyExpenseTrend(month, 6, categories, trendTxns ?? [], startDay);
 
   // Previous month's total (the point right before the current one in the trend).
   const prevExpenseTotal = trend.length >= 2 ? trend[trend.length - 2].total : null;

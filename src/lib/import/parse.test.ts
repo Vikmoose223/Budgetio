@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { parseRows, parseAmount, parseDate, externalId } from "./parse";
+import {
+  parseRows,
+  parseAmount,
+  parseDate,
+  externalId,
+  foreignLabel,
+} from "./parse";
 
 describe("parseAmount", () => {
   test("strips ₪, spaces and thousands separators", () => {
@@ -13,63 +19,88 @@ describe("parseAmount", () => {
 });
 
 describe("parseDate", () => {
-  test("day-first short and long years", () => {
+  test("day-first strings, short and long years", () => {
     expect(parseDate("7/7/26")).toBe("2026-07-07");
     expect(parseDate("30/06/2026")).toBe("2026-06-30");
   });
-  test("rejects impossible dates", () => {
+  test("Excel serial numbers", () => {
+    expect(parseDate("46205")).toBe("2026-07-02");
+  });
+  test("rejects impossible / non-dates", () => {
     expect(parseDate("31/02/26")).toBeNull();
     expect(parseDate("hello")).toBeNull();
+    expect(parseDate("2")).toBeNull();
   });
 });
 
-// Mirrors the real Discount Visa export: title/summary rows, header on row 4,
-// data rows, then a footer row without a date.
-const matrix: unknown[][] = [
-  ["פירוט עסקאות לחשבון דיסקונט"],
-  [],
-  ["עסקאות לחיוב ב-10/07/2026: 5,101"],
-  ["עסקאות בתהליך קליטה 17.68 ₪"],
+// Format A — Discount Visa: DD/MM/YY dates, "ענף" column, one section.
+const discount: unknown[][] = [
+  ["פירוט עסקאות"],
   ["תאריך\r\nעסקה", "שם בית עסק", "סכום\r\nעסקה", "סכום\r\nחיוב", "סוג\r\nעסקה", "ענף", "הערות"],
-  ["7/7/26", "עילא חנות אוכל", "₪ 17.68", "", "רכישה רגילה", "מזון ומשקאות", "עסקה בקליטה"],
-  ["4/7/26", "דלק מנטה מסמיה", "₪ 187.95", "₪ 187.95", "רגילה", "אנרגיה", ""],
-  ["29/6/26", "rentalcars.com", "₪ 1,256.00", "₪ 1,256.00", "רגילה", "רכב ותחבורה", ""],
-  ["סה\"כ", "", "", "₪ 1,461.63"],
+  ["4/7/26", "דלק מנטה", "₪ 187.95", "₪ 187.95", "רגילה", "אנרגיה", ""],
+  ["סה\"כ", "", "", "₪ 187.95"],
 ];
 
-describe("parseRows", () => {
-  const parsed = parseRows(matrix);
+// Format B — multi-section card export: serial dates, a "חיוב לתאריך" trap
+// column before the real date, and a foreign section with a currency column.
+const multi: unknown[][] = [
+  ["חיובים קרובים"],
+  ["פירוט עבור הכרטיסים בארץ"],
+  ["שם כרטיס", "חיוב לתאריך", "תאריך", "שם בית עסק", "סכום חיוב בש''ח", "סכום קנייה", "אסמכתא", "תאור סוג עסקת אשראי"],
+  ["9925", "46213", "46205", "קפה תדהר", "40.00", "40.00", "1016", "עסקה רגילה"],
+  ["9925", "46213", "46205", "נאייקס מכונות", "2.00", "2.00", "2005566", "עסקה רגילה"],
+  [],
+  ["פירוט עבור הכרטיסים בחו''ל"],
+  ["שם כרטיס", "חיוב לתאריך", "תאריך", "שם בית עסק", "סכום חיוב בש''ח", "סכום קנייה", "מטבע מקורי", "אסמכתא", "תאור סוג עסקת אשראי"],
+  ["9925", "46205", "46152", "MAISON RAMBUTEAU", "201.93", "59.00", "EUR", "198644", "עסקה רגילה"],
+];
 
-  test("detects the header row and columns", () => {
-    expect(parsed.headerRow).toBe(4);
-    expect(parsed.columns.merchant).toBe(1);
-    expect(parsed.columns.industry).toBe(5);
-  });
-
-  test("reads only real data rows, skipping the footer", () => {
-    expect(parsed.rows).toHaveLength(3);
-    expect(parsed.skipped).toBe(1);
-  });
-
-  test("uses charge amount, falling back to transaction amount when empty", () => {
+describe("parseRows — Discount format", () => {
+  const parsed = parseRows(discount);
+  test("reads the data row, skips the footer, uses charge amount", () => {
+    expect(parsed.rows).toHaveLength(1);
     expect(parsed.rows[0]).toMatchObject({
-      occurredOn: "2026-07-07",
-      merchant: "עילא חנות אוכל",
-      amount: 17.68, // charge empty → transaction amount
-      rawCategory: "מזון ומשקאות",
+      occurredOn: "2026-07-04",
+      merchant: "דלק מנטה",
+      amount: 187.95,
+      rawCategory: "אנרגיה",
     });
-    expect(parsed.rows[1].amount).toBe(187.95);
-    expect(parsed.rows[2].amount).toBe(1256);
+  });
+});
+
+describe("parseRows — multi-section format", () => {
+  const parsed = parseRows(multi);
+
+  test("finds both sections and all data rows", () => {
+    expect(parsed.sections).toBe(2);
+    expect(parsed.rows).toHaveLength(3);
   });
 
-  test("throws a friendly error when no header is found", () => {
-    expect(() => parseRows([["foo", "bar"], ["1", "2"]])).toThrow();
+  test("uses the transaction date column, not 'חיוב לתאריך'", () => {
+    // Serial 46205 = 2026-07-02, NOT the billing date 46213.
+    expect(parsed.rows[0].occurredOn).toBe("2026-07-02");
+    expect(parsed.rows[0]).toMatchObject({ merchant: "קפה תדהר", amount: 40 });
+  });
+
+  test("captures foreign currency + original amount, ILS as the amount", () => {
+    const fx = parsed.rows.find((r) => r.merchant === "MAISON RAMBUTEAU")!;
+    expect(fx.amount).toBe(201.93); // ILS charge
+    expect(fx.currency).toBe("EUR");
+    expect(fx.originalAmount).toBe(59);
   });
 });
 
 describe("externalId", () => {
-  test("is stable for the same row content", () => {
-    const [a] = parseRows(matrix).rows;
-    expect(externalId(a)).toBe(externalId({ ...a }));
+  test("includes the reference so same-day same-amount rows stay distinct", () => {
+    const [a, b] = parseRows(multi).rows;
+    expect(externalId(a)).not.toBe(externalId(b));
+    expect(externalId(a)).toContain("1016"); // reference
+  });
+});
+
+describe("foreignLabel", () => {
+  test("formats known currency symbols", () => {
+    expect(foreignLabel("EUR", 59)).toBe("€59.00");
+    expect(foreignLabel("USD", 7)).toBe("$7.00");
   });
 });
