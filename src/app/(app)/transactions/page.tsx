@@ -38,10 +38,13 @@ export default async function TransactionsPage({
     .order("created_at", { ascending: false })
     .limit(500);
 
-  const filterCategory = sp.category
-    ? categories.find((c) => c.id === sp.category)
-    : undefined;
-  if (filterCategory) query = query.eq("category_id", filterCategory.id);
+  const wantUncategorized = sp.category === "none";
+  const filterCategory =
+    sp.category && !wantUncategorized
+      ? categories.find((c) => c.id === sp.category)
+      : undefined;
+  if (wantUncategorized) query = query.is("category_id", null);
+  else if (filterCategory) query = query.eq("category_id", filterCategory.id);
   if (monthISO) {
     const { data: hh } = await supabase
       .from("households")
@@ -55,9 +58,12 @@ export default async function TransactionsPage({
   const { data: transactions } = await query;
 
   const filter =
-    filterCategory || monthISO
+    wantUncategorized || filterCategory || monthISO
       ? {
-          label: [filterCategory?.name, monthISO ? monthLabel(monthISO) : null]
+          label: [
+            wantUncategorized ? "לא מסווג" : filterCategory?.name,
+            monthISO ? monthLabel(monthISO) : null,
+          ]
             .filter(Boolean)
             .join(" · "),
         }

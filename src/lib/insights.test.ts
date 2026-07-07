@@ -18,6 +18,7 @@ describe("generateInsights", () => {
       totalExpenseGoal: 3400,
       totalSavingSpent: 200,
       totalSavingGoal: 500,
+      uncategorizedSpent: 0,
     };
 
     const insights = generateInsights({ summary, prevExpenseTotal: 400 });
@@ -35,6 +36,7 @@ describe("generateInsights", () => {
       totalExpenseGoal: 400,
       totalSavingSpent: 0,
       totalSavingGoal: 0,
+      uncategorizedSpent: 0,
     };
     const insights = generateInsights({ summary, prevExpenseTotal: null });
     expect(insights.some((i) => i.id === "under-budget")).toBe(true);
@@ -53,6 +55,7 @@ describe("generateInsights", () => {
       totalExpenseGoal: 300,
       totalSavingSpent: 500,
       totalSavingGoal: 500,
+      uncategorizedSpent: 0,
     };
     const insights = generateInsights({ summary, prevExpenseTotal: 100 });
     expect(insights.length).toBeLessThanOrEqual(4);

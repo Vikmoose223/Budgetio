@@ -108,9 +108,10 @@ test.describe("auth + household onboarding", () => {
     await page.getByRole("button", { name: "שמירה" }).click();
     await expect(page.getByText(/2,500/).first()).toBeVisible();
 
-    // --- Category drill-down ---
+    // --- Category drill-down: expand on the dashboard, then open full list ---
     await page.goto("/dashboard");
-    await page.getByRole("link", { name: /מזון/ }).first().click();
+    await page.getByRole("button", { name: /מזון/ }).first().click();
+    await page.getByRole("link", { name: /כל ההוצאות/ }).first().click();
     await expect(page).toHaveURL(/\/transactions\?category=/);
     await expect(page.getByText("הצג הכול")).toBeVisible();
 

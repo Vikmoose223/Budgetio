@@ -22,10 +22,11 @@ export type CategorySummary = {
 
 export type MonthSummary = {
   perCategory: CategorySummary[];
-  totalExpenseSpent: number;
+  totalExpenseSpent: number; // includes uncategorized spending
   totalExpenseGoal: number;
   totalSavingSpent: number;
   totalSavingGoal: number;
+  uncategorizedSpent: number; // no category, or a category that no longer exists
 };
 
 /** Sum transaction amounts per category id. */
@@ -47,6 +48,7 @@ export function summarizeMonth(
   transactions: AggTxn[],
   goalByCategory: Map<string, number>,
 ): MonthSummary {
+  const kindById = new Map(categories.map((c) => [c.id, c.kind]));
   const spent = spentByCategory(transactions);
 
   const perCategory: CategorySummary[] = categories.map((category) => ({
@@ -55,17 +57,26 @@ export function summarizeMonth(
     goal: goalByCategory.get(category.id) ?? 0,
   }));
 
-  let totalExpenseSpent = 0,
-    totalExpenseGoal = 0,
-    totalSavingSpent = 0,
+  // Goals come from the categories.
+  let totalExpenseGoal = 0,
     totalSavingGoal = 0;
-  for (const { category, spent: s, goal } of perCategory) {
-    if (category.kind === "saving") {
-      totalSavingSpent += s;
-      totalSavingGoal += goal;
+  for (const { category, goal } of perCategory) {
+    if (category.kind === "saving") totalSavingGoal += goal;
+    else totalExpenseGoal += goal;
+  }
+
+  // Spending is summed over ALL transactions so uncategorized ones still count.
+  let totalExpenseSpent = 0,
+    totalSavingSpent = 0,
+    uncategorizedSpent = 0;
+  for (const t of transactions) {
+    const amt = Number(t.amount);
+    const kind = t.category_id ? kindById.get(t.category_id) : undefined;
+    if (kind === "saving") {
+      totalSavingSpent += amt;
     } else {
-      totalExpenseSpent += s;
-      totalExpenseGoal += goal;
+      totalExpenseSpent += amt;
+      if (kind === undefined) uncategorizedSpent += amt;
     }
   }
 
@@ -75,6 +86,7 @@ export function summarizeMonth(
     totalExpenseGoal,
     totalSavingSpent,
     totalSavingGoal,
+    uncategorizedSpent,
   };
 }
 

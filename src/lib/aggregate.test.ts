@@ -36,9 +36,11 @@ describe("summarizeMonth", () => {
     expect(s.perCategory[1]).toMatchObject({ spent: 0, goal: 3000 });
   });
 
-  test("splits expense vs saving totals", () => {
+  test("splits expense vs saving totals, counting uncategorized as expense", () => {
     const s = summarizeMonth(cats, txns, goals);
-    expect(s.totalExpenseSpent).toBe(150);
+    // 100 + 50 (food) + 999 (uncategorized) = 1149
+    expect(s.totalExpenseSpent).toBe(1149);
+    expect(s.uncategorizedSpent).toBe(999);
     expect(s.totalExpenseGoal).toBe(3400);
     expect(s.totalSavingSpent).toBe(200);
     expect(s.totalSavingGoal).toBe(500);

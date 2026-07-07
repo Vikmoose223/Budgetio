@@ -120,6 +120,36 @@ export function ImportView({
     setRows((rs) =>
       rs.map((r) => (r.key === key ? { ...r, categoryId } : r)),
     );
+
+    // Offer to apply the same category to the merchant's other rows in this
+    // import (it's also learned for future imports on approval).
+    const changed = rows.find((r) => r.key === key);
+    if (!changed || !categoryId) return;
+    const merchant = changed.parsed.merchant;
+    const others = rows.filter(
+      (r) =>
+        r.key !== key &&
+        !r.duplicate &&
+        r.parsed.merchant === merchant &&
+        r.categoryId !== categoryId,
+    );
+    if (others.length === 0) return;
+
+    const catName = categories.find((c) => c.id === categoryId)?.name ?? "";
+    toast(`להחיל "${catName}" על עוד ${others.length} עסקאות של "${merchant}"?`, {
+      duration: 8000,
+      action: {
+        label: "כן, החל על הכול",
+        onClick: () =>
+          setRows((rs) =>
+            rs.map((r) =>
+              !r.duplicate && r.parsed.merchant === merchant
+                ? { ...r, categoryId }
+                : r,
+            ),
+          ),
+      },
+    });
   }
   function toggleInclude(key: string) {
     setRows((rs) =>

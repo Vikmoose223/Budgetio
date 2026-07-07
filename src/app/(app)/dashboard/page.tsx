@@ -8,7 +8,7 @@ import { InviteCode } from "@/components/invite-code";
 import { SpendingDonut } from "./spending-donut";
 import { TrendChart } from "./trend-chart";
 import { MonthPicker } from "./month-picker";
-import { categoryIconElement, categoryTintStyle } from "@/lib/categories";
+import { CategoryBreakdown } from "./category-breakdown";
 import { formatILS, firstOfMonthISO, addMonths, periodRange } from "@/lib/format";
 import { summarizeMonth, monthlyExpenseTrend } from "@/lib/aggregate";
 import { generateInsights, type Insight } from "@/lib/insights";
@@ -71,10 +71,11 @@ export default async function DashboardPage({
       .order("sort_order"),
     supabase
       .from("transactions")
-      .select("category_id, amount, occurred_on")
+      .select("id, category_id, amount, occurred_on, description, merchant")
       .eq("household_id", householdId)
       .gte("occurred_on", start)
-      .lt("occurred_on", endExclusive),
+      .lt("occurred_on", endExclusive)
+      .order("occurred_on", { ascending: false }),
     supabase
       .from("transactions")
       .select("category_id, amount, occurred_on")
@@ -110,12 +111,6 @@ export default async function DashboardPage({
     }));
 
   const remaining = summary.totalExpenseGoal - summary.totalExpenseSpent;
-  const expenseRows = summary.perCategory.filter(
-    (c) => c.category.kind === "expense",
-  );
-  const savingRows = summary.perCategory.filter(
-    (c) => c.category.kind === "saving",
-  );
 
   return (
     <div className="mx-auto w-full max-w-3xl px-5 py-6 sm:px-6">
@@ -196,22 +191,13 @@ export default async function DashboardPage({
           <CardHeader>
             <CardTitle className="text-base">מול היעדים</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            {expenseRows.map((row) => (
-              <CategoryProgress key={row.category.id} row={row} month={month} />
-            ))}
-            {savingRows.length > 0 && (
-              <div className="mt-1 border-t border-border pt-3">
-                {savingRows.map((row) => (
-                  <CategoryProgress
-                    key={row.category.id}
-                    row={row}
-                    month={month}
-                    saving
-                  />
-                ))}
-              </div>
-            )}
+          <CardContent>
+            <CategoryBreakdown
+              perCategory={summary.perCategory}
+              uncategorizedSpent={summary.uncategorizedSpent}
+              transactions={monthTxns ?? []}
+              month={month}
+            />
           </CardContent>
         </Card>
       </div>
@@ -366,56 +352,3 @@ function InsightRow({ insight }: { insight: Insight }) {
   );
 }
 
-function CategoryProgress({
-  row,
-  month,
-  saving,
-}: {
-  row: {
-    category: { id: string; name: string; icon: string | null; color: string | null };
-    spent: number;
-    goal: number;
-  };
-  month: string;
-  saving?: boolean;
-}) {
-  const { category, spent, goal } = row;
-  const pct = goal > 0 ? Math.min(100, (spent / goal) * 100) : 0;
-  const over = goal > 0 && spent > goal;
-  const barColor = saving
-    ? "var(--success)"
-    : over
-      ? "var(--destructive)"
-      : `var(--${category.color ?? "chart-1"})`;
-
-  return (
-    <Link
-      href={`/transactions?category=${category.id}&month=${month.slice(0, 7)}`}
-      className="flex flex-col gap-1.5 rounded-lg p-1 transition-colors hover:bg-accent/50"
-    >
-      <div className="flex items-center gap-2.5">
-        <span
-          className="flex size-7 shrink-0 items-center justify-center rounded-md"
-          style={categoryTintStyle(category.color)}
-        >
-          {categoryIconElement(category.icon, "size-3.5")}
-        </span>
-        <span className="flex-1 text-sm font-medium">{category.name}</span>
-        <span className="text-xs tabular-nums text-muted-foreground">
-          {formatILS(spent)}
-          {goal > 0 && (
-            <span className="text-muted-foreground/70"> / {formatILS(goal)}</span>
-          )}
-        </span>
-      </div>
-      {goal > 0 && (
-        <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-          <div
-            className="h-full rounded-full transition-all"
-            style={{ width: `${Math.max(pct, spent > 0 ? 4 : 0)}%`, backgroundColor: barColor }}
-          />
-        </div>
-      )}
-    </Link>
-  );
-}
