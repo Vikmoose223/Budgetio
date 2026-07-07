@@ -82,6 +82,20 @@ test.describe("auth + household onboarding", () => {
     await page.getByRole("button", { name: "מחיקה" }).click();
     await expect(page.getByText("קניות שבועיות")).toHaveCount(0);
 
+    // --- Import a bank statement ---
+    await page.getByRole("link", { name: "ייבוא" }).click();
+    await expect(page).toHaveURL(/\/import$/);
+    await page
+      .locator('input[type="file"]')
+      .setInputFiles("e2e/fixtures/statement.xlsx");
+    // Review screen appears with the parsed rows
+    await expect(page.getByText("שופרסל בדיקה")).toBeVisible();
+    await page.getByRole("button", { name: /אישור ושמירה/ }).click();
+    // Imported rows land in the expenses list
+    await expect(page).toHaveURL(/\/transactions$/);
+    await expect(page.getByText("שופרסל בדיקה").first()).toBeVisible();
+    await expect(page.getByText("דלק בדיקה").first()).toBeVisible();
+
     // --- Sign out ---
     await page.goto("/dashboard");
     await page.getByRole("button", { name: "יציאה" }).click();

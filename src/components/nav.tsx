@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ReceiptText } from "lucide-react";
+import { LayoutDashboard, ReceiptText, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const NAV_ITEMS = [
   { href: "/dashboard", label: "דשבורד", icon: LayoutDashboard },
   { href: "/transactions", label: "הוצאות", icon: ReceiptText },
+  { href: "/import", label: "ייבוא", icon: Upload },
 ];
 
 function isActive(pathname: string, href: string) {
