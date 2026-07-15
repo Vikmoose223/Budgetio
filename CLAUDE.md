@@ -25,7 +25,7 @@ insights. Personal use.
 - `src/app/onboarding/`, `src/app/login/` — outside the `(app)` shell.
 - `src/lib/supabase/` — `client.ts`, `server.ts` (async `cookies()`), `middleware.ts` (session), `types.ts` (hand-maintained `Database` type — keep in sync with migrations).
 - `src/lib/import/` — `parse.ts` (format-agnostic: multi-section, serial dates, foreign currency, reference dedup), `categorize.ts` (learned rules → bank "ענף" → keywords), `read-workbook.ts`.
-- `src/lib/` — `aggregate.ts` (`summarizeMonth`, `monthlyExpenseTrend`), `insights.ts` (rule-based), `recurring.ts`, `format.ts` (ILS + billing-cycle helpers), `categories.ts`.
+- `src/lib/` — `aggregate.ts` (`summarizeMonth`, `monthlyExpenseTrend`), `insights.ts` (rule-based), `recurring.ts`, `format.ts` (ILS + billing-cycle helpers), `categories.ts`, `dedup.ts` (fuzzy duplicate detection: exact name+date+amount).
 - `src/components/month-nav.tsx` — shared month stepper/picker (serializable props only).
 
 ## Data model (Supabase; migrations in `supabase/migrations/`, all applied)
@@ -38,6 +38,7 @@ insights. Personal use.
 - **Goals are fixed per category** (same every month), stored on `categories.monthly_goal`.
 - **Budget month = a billing period** starting on `month_start_day`. Use `periodRange(monthISO, startDay)` and `budgetMonthOf(dateISO, startDay)`. Dashboard & expenses tab default to `budgetMonthOf(today, startDay)` — NOT the calendar month (a past bug).
 - Dashboard "total expenses" includes uncategorized spending (all non-saving txns).
+- **Two-tier duplicate detection.** Exact re-imports are skipped via the `external_id` (`date|amount|merchant|reference`) unique key. On top of that, `dedup.ts` flags *fuzzy* duplicates — same name+date+amount (whitespace/case-insensitive) that the key missed (differing/absent bank reference, or a manual entry with no `external_id`). Import shows a per-row **דלג/החלף/שמור שניהם** control (default skip); manual add opens a resolution dialog. "Replace" updates the existing row in place. Adding a dup-check `SELECT` before manual insert makes saving slightly slower — E2E must wait for the dialog to close before navigating (navigating mid-insert cancels it).
 - Next 16: async request APIs (`await cookies()`, `params`, `searchParams`); `next lint` removed. **Never pass a function prop from a Server Component to a Client Component** (crashes) — pass serializable data (e.g. `MonthNav` takes `basePath` + `params`).
 - Client-side Supabase mutations with optimistic UI + `router.refresh()`, matching the existing pattern.
 - **A client view seeded from a server prop (`useState(initial)`) must re-sync when that prop changes on `?searchParams` navigation** — the client instance persists across the transition, so `useState` alone freezes the data. `TransactionsView` resets `txns` during render when a `month|category` key changes (past bug: changing months moved the picker but not the expenses).

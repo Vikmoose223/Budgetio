@@ -67,8 +67,13 @@ test.describe("expenses month navigation + latency", () => {
     await page.getByLabel("תיאור").fill("הוצאה ישנה");
     await page.getByLabel("תאריך").fill(backDate);
     await page.getByRole("button", { name: "שמירה" }).click();
-    // The old expense is outside the current billing month, so after save it
-    // should NOT appear in the (current-month) list.
+    // Wait for the save to finish (the dialog closes only after the insert
+    // resolves) before navigating — navigating mid-insert would cancel it.
+    await expect(page.getByRole("dialog")).toBeHidden();
+
+    // Reload the current month from the server (drops optimistic state). The
+    // old expense is outside the current billing period, so it must not show.
+    await page.goto("/transactions");
     await expect(page.getByText("הוצאה נוכחית")).toBeVisible();
     await expect(page.getByText("הוצאה ישנה")).toHaveCount(0);
 

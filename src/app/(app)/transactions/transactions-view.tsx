@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { ExpenseForm, type Category, type ExpenseValues } from "./expense-form";
 import { MonthNav } from "@/components/month-nav";
+import { findDuplicates, type DupExisting } from "@/lib/dedup";
 import { categoryIconElement, categoryTintStyle } from "@/lib/categories";
 import { formatILS, formatDate } from "@/lib/format";
 import { toast } from "sonner";
@@ -68,6 +69,12 @@ export function TransactionsView({
   const [editing, setEditing] = useState<Txn | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [query, setQuery] = useState("");
+  // When a new manual expense matches an existing one (same name+date+amount),
+  // we pause and ask the user how to resolve it instead of inserting blindly.
+  const [dupPrompt, setDupPrompt] = useState<{
+    values: ExpenseValues;
+    existing: DupExisting;
+  } | null>(null);
 
   // When the month or category filter changes, the server component re-fetches
   // and passes fresh `initial`. This client component instance persists across
@@ -117,21 +124,42 @@ export function TransactionsView({
     });
   }
 
+  // Insert a brand-new manual expense (optimistic list update).
+  async function insertNew(v: ExpenseValues) {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("transactions")
+      .insert({
+        category_id: v.categoryId,
+        occurred_on: v.occurredOn,
+        amount: parseFloat(v.amount),
+        description: v.description || null,
+        merchant: v.merchant || null,
+        household_id: householdId,
+        source: "manual",
+        created_by: userId,
+      })
+      .select(TXN_COLS)
+      .single();
+    if (error) throw error;
+    setTxns((prev) => sortByDateDesc([data as Txn, ...prev]));
+    toast.success("ההוצאה נוספה");
+  }
+
   async function handleSubmit(v: ExpenseValues) {
     setSubmitting(true);
     const supabase = createClient();
-    const payload = {
-      category_id: v.categoryId,
-      occurred_on: v.occurredOn,
-      amount: parseFloat(v.amount),
-      description: v.description || null,
-      merchant: v.merchant || null,
-    };
     try {
       if (editing) {
         const { data, error } = await supabase
           .from("transactions")
-          .update(payload)
+          .update({
+            category_id: v.categoryId,
+            occurred_on: v.occurredOn,
+            amount: parseFloat(v.amount),
+            description: v.description || null,
+            merchant: v.merchant || null,
+          })
           .eq("id", editing.id)
           .select(TXN_COLS)
           .single();
@@ -148,24 +176,82 @@ export function TransactionsView({
         } else {
           toast.success("ההוצאה עודכנה");
         }
+        setDialogOpen(false);
       } else {
-        const { data, error } = await supabase
+        // Guard: is there already an expense with the same name+date+amount?
+        const name = (v.merchant || v.description || "").trim();
+        const { data: sameDate } = await supabase
           .from("transactions")
-          .insert({
-            ...payload,
-            household_id: householdId,
-            source: "manual",
-            created_by: userId,
-          })
-          .select(TXN_COLS)
-          .single();
-        if (error) throw error;
-        setTxns((prev) => sortByDateDesc([data as Txn, ...prev]));
-        toast.success("ההוצאה נוספה");
+          .select("id, occurred_on, amount, merchant, description")
+          .eq("household_id", householdId)
+          .eq("occurred_on", v.occurredOn);
+        const dup = findDuplicates(
+          { occurredOn: v.occurredOn, amount: parseFloat(v.amount), name },
+          (sameDate ?? []).map((e) => ({
+            id: e.id,
+            occurred_on: e.occurred_on,
+            amount: Number(e.amount),
+            merchant: e.merchant,
+            description: e.description,
+          })),
+        )[0];
+        if (dup) {
+          // Hand off to the resolution dialog instead of inserting.
+          setDupPrompt({ values: v, existing: dup });
+          setDialogOpen(false);
+        } else {
+          await insertNew(v);
+          setDialogOpen(false);
+        }
       }
-      setDialogOpen(false);
     } catch {
       toast.error("שמירה נכשלה. נסו שוב.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // User chose to keep the new expense alongside the existing duplicate.
+  async function resolveDupKeep() {
+    if (!dupPrompt) return;
+    setSubmitting(true);
+    try {
+      await insertNew(dupPrompt.values);
+      setDupPrompt(null);
+    } catch {
+      toast.error("שמירה נכשלה. נסו שוב.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // User chose to overwrite the existing expense with the new values.
+  async function resolveDupReplace() {
+    if (!dupPrompt) return;
+    setSubmitting(true);
+    const supabase = createClient();
+    const v = dupPrompt.values;
+    try {
+      const { data, error } = await supabase
+        .from("transactions")
+        .update({
+          category_id: v.categoryId,
+          occurred_on: v.occurredOn,
+          amount: parseFloat(v.amount),
+          description: v.description || null,
+          merchant: v.merchant || null,
+        })
+        .eq("id", dupPrompt.existing.id)
+        .select(TXN_COLS)
+        .single();
+      if (error) throw error;
+      setTxns((prev) =>
+        sortByDateDesc(prev.map((t) => (t.id === data.id ? (data as Txn) : t))),
+      );
+      toast.success("ההוצאה הוחלפה");
+      setDupPrompt(null);
+    } catch {
+      toast.error("החלפה נכשלה. נסו שוב.");
     } finally {
       setSubmitting(false);
     }
@@ -331,6 +417,66 @@ export function TransactionsView({
             onDelete={editing ? handleDelete : undefined}
             submitting={submitting}
           />
+        </DialogContent>
+      </Dialog>
+
+      {/* Duplicate resolution: a new manual expense matched an existing one. */}
+      <Dialog
+        open={dupPrompt !== null}
+        onOpenChange={(o) => {
+          if (!o) setDupPrompt(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>נמצאה הוצאה זהה</DialogTitle>
+            <DialogDescription>
+              כבר קיימת הוצאה עם אותו שם, תאריך וסכום. מה תרצו לעשות?
+            </DialogDescription>
+          </DialogHeader>
+          {dupPrompt && (
+            <div className="rounded-xl border border-border bg-muted/40 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">
+                    {dupPrompt.existing.merchant ||
+                      dupPrompt.existing.description ||
+                      "הוצאה"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatDate(dupPrompt.existing.occurred_on)}
+                  </p>
+                </div>
+                <span className="shrink-0 text-sm font-semibold tabular-nums">
+                  {formatILS(Number(dupPrompt.existing.amount))}
+                </span>
+              </div>
+            </div>
+          )}
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button
+              onClick={resolveDupReplace}
+              disabled={submitting}
+              className="flex-1"
+            >
+              החלף קיים
+            </Button>
+            <Button
+              variant="outline"
+              onClick={resolveDupKeep}
+              disabled={submitting}
+              className="flex-1"
+            >
+              שמור שניהם
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => setDupPrompt(null)}
+              disabled={submitting}
+            >
+              ביטול
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

@@ -15,6 +15,7 @@ import {
   type NamedCategory,
   type SuggestionSource,
 } from "@/lib/import/categorize";
+import { findDuplicates, type DupExisting } from "@/lib/dedup";
 import { categoryIconElement, categoryTintStyle } from "@/lib/categories";
 import { formatILS, formatDate } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -32,14 +33,19 @@ type Category = {
 };
 type Rule = { keyword: string; category_id: string };
 
+// How to resolve a fuzzy (name+date+amount) match against an existing expense.
+type Resolution = "keep" | "replace" | "skip";
+
 type ReviewRow = {
   key: string;
   parsed: ParsedRow;
   externalId: string;
   categoryId: string | null;
   source: SuggestionSource;
-  duplicate: boolean;
-  include: boolean;
+  duplicate: boolean; // exact re-import (external_id already in DB) — auto-skipped
+  possibleDup: DupExisting | null; // same name+date+amount as an existing row
+  resolution: Resolution; // only meaningful when possibleDup != null
+  include: boolean; // for normal (non-duplicate) rows
 };
 
 export function ImportView({
@@ -81,9 +87,10 @@ export function ImportView({
         categories.map((c) => [c.name, { id: c.id, name: c.name, kind: c.kind }]),
       );
 
-      // Find rows already imported before (dedupe by external id).
-      const ids = parsed.rows.map(externalId);
       const supabase = createClient();
+
+      // Exact re-imports: rows whose external_id already exists (auto-skipped).
+      const ids = parsed.rows.map(externalId);
       const { data: existing } = await supabase
         .from("transactions")
         .select("external_id")
@@ -91,10 +98,34 @@ export function ImportView({
         .in("external_id", ids);
       const existingIds = new Set((existing ?? []).map((e) => e.external_id));
 
+      // Fuzzy matches: pull existing expenses on the same dates as the import
+      // so we can flag same name+date+amount rows the external_id key missed
+      // (differing/absent bank reference, or a manual entry).
+      const dates = [...new Set(parsed.rows.map((p) => p.occurredOn))];
+      const { data: sameDate } = await supabase
+        .from("transactions")
+        .select("id, occurred_on, amount, merchant, description")
+        .eq("household_id", householdId)
+        .in("occurred_on", dates);
+      const existingByDate: DupExisting[] = (sameDate ?? []).map((e) => ({
+        id: e.id,
+        occurred_on: e.occurred_on,
+        amount: Number(e.amount),
+        merchant: e.merchant,
+        description: e.description,
+      }));
+
       const review: ReviewRow[] = parsed.rows.map((p, i) => {
         const ext = externalId(p);
         const s = suggestCategory(p, { rules, categoriesByName });
         const duplicate = existingIds.has(ext);
+        // Only fuzzy-check rows that aren't already exact duplicates.
+        const possibleDup = duplicate
+          ? null
+          : (findDuplicates(
+              { occurredOn: p.occurredOn, amount: p.amount, name: p.merchant },
+              existingByDate,
+            )[0] ?? null);
         return {
           key: `${i}-${ext}`,
           parsed: p,
@@ -102,7 +133,9 @@ export function ImportView({
           categoryId: s.categoryId,
           source: s.source,
           duplicate,
-          include: !duplicate,
+          possibleDup,
+          resolution: "skip",
+          include: !duplicate && !possibleDup,
         };
       });
 
@@ -156,46 +189,85 @@ export function ImportView({
       rs.map((r) => (r.key === key ? { ...r, include: !r.include } : r)),
     );
   }
+  function setResolution(key: string, resolution: Resolution) {
+    setRows((rs) =>
+      rs.map((r) => (r.key === key ? { ...r, resolution } : r)),
+    );
+  }
 
-  const includable = rows.filter((r) => !r.duplicate);
-  const included = includable.filter((r) => r.include);
-  const duplicates = rows.length - includable.length;
-  const uncategorized = included.filter((r) => !r.categoryId).length;
-  const includedTotal = included.reduce((s, r) => s + r.parsed.amount, 0);
+  // Normal rows (no duplicate of any kind) chosen for insert.
+  const normalIncluded = rows.filter(
+    (r) => !r.duplicate && !r.possibleDup && r.include,
+  );
+  // Fuzzy matches the user chose to keep as a second copy → also inserted.
+  const keepBoth = rows.filter((r) => r.possibleDup && r.resolution === "keep");
+  const toInsert = [...normalIncluded, ...keepBoth];
+  // Fuzzy matches the user chose to overwrite the existing row with.
+  const toReplace = rows.filter(
+    (r) => r.possibleDup && r.resolution === "replace",
+  );
+
+  const exactDupCount = rows.filter((r) => r.duplicate).length;
+  const possibleDupCount = rows.filter((r) => r.possibleDup).length;
+  const uncategorized = toInsert.filter((r) => !r.categoryId).length;
+  const includedTotal = toInsert.reduce((s, r) => s + r.parsed.amount, 0);
+  const actionCount = toInsert.length + toReplace.length;
+
+  // Row → transaction column values (shared by insert and replace).
+  function rowValues(r: ReviewRow) {
+    return {
+      category_id: r.categoryId,
+      occurred_on: r.parsed.occurredOn,
+      amount: r.parsed.amount,
+      // For foreign charges, keep the original amount visible in the title.
+      description:
+        r.parsed.currency && r.parsed.originalAmount
+          ? `${r.parsed.merchant} · ${foreignLabel(r.parsed.currency, r.parsed.originalAmount)}`
+          : r.parsed.merchant,
+      merchant: r.parsed.merchant,
+      source: "import" as const,
+      external_id: r.externalId,
+    };
+  }
 
   async function commit() {
-    if (included.length === 0) {
+    if (actionCount === 0) {
       toast.error("אין עסקאות חדשות לשמור.");
       return;
     }
     setBusy(true);
     const supabase = createClient();
     try {
-      const payload = included.map((r) => ({
-        household_id: householdId,
-        category_id: r.categoryId,
-        occurred_on: r.parsed.occurredOn,
-        amount: r.parsed.amount,
-        // For foreign charges, keep the original amount visible in the title.
-        description:
-          r.parsed.currency && r.parsed.originalAmount
-            ? `${r.parsed.merchant} · ${foreignLabel(r.parsed.currency, r.parsed.originalAmount)}`
-            : r.parsed.merchant,
-        merchant: r.parsed.merchant,
-        source: "import" as const,
-        external_id: r.externalId,
-        created_by: userId,
-      }));
-      // Duplicates were already filtered client-side; the DB's unique index on
-      // (household_id, external_id) is a final guard.
-      const { error: insErr } = await supabase
-        .from("transactions")
-        .insert(payload);
-      if (insErr) throw insErr;
+      // Insert new rows (normal + "keep both" fuzzy matches). The DB's unique
+      // index on (household_id, external_id) is a final guard against exact dups.
+      if (toInsert.length > 0) {
+        const { error: insErr } = await supabase.from("transactions").insert(
+          toInsert.map((r) => ({
+            ...rowValues(r),
+            household_id: householdId,
+            created_by: userId,
+          })),
+        );
+        if (insErr) throw insErr;
+      }
+
+      // Replace: overwrite the matched existing rows in place (keeps one copy).
+      if (toReplace.length > 0) {
+        const results = await Promise.all(
+          toReplace.map((r) =>
+            supabase
+              .from("transactions")
+              .update(rowValues(r))
+              .eq("id", r.possibleDup!.id),
+          ),
+        );
+        const failed = results.find((res) => res.error);
+        if (failed?.error) throw failed.error;
+      }
 
       // Learn merchant → category so future imports auto-categorize (memory).
       const learned = new Map<string, string>();
-      for (const r of included) {
+      for (const r of [...toInsert, ...toReplace]) {
         if (r.categoryId) learned.set(r.parsed.merchant, r.categoryId);
       }
       if (learned.size > 0) {
@@ -209,7 +281,11 @@ export function ImportView({
         );
       }
 
-      toast.success(`יובאו ${included.length} עסקאות`);
+      const parts = [
+        toInsert.length > 0 ? `${toInsert.length} נשמרו` : null,
+        toReplace.length > 0 ? `${toReplace.length} הוחלפו` : null,
+      ].filter(Boolean);
+      toast.success(parts.join(" · ") || "הייבוא הושלם");
       router.push("/transactions");
       router.refresh();
     } catch {
@@ -282,11 +358,19 @@ export function ImportView({
                 {fileName}
               </span>
               <span className="text-muted-foreground">
-                {included.length} לשמירה · {formatILS(includedTotal)}
+                {toInsert.length} לשמירה · {formatILS(includedTotal)}
               </span>
-              {duplicates > 0 && (
+              {toReplace.length > 0 && (
+                <span className="text-primary">{toReplace.length} להחלפה</span>
+              )}
+              {possibleDupCount > 0 && (
+                <span className="text-warning">
+                  {possibleDupCount} כפילויות אפשריות
+                </span>
+              )}
+              {exactDupCount > 0 && (
                 <span className="text-muted-foreground">
-                  {duplicates} כבר קיימות
+                  {exactDupCount} כבר קיימות
                 </span>
               )}
               {uncategorized > 0 && (
@@ -304,6 +388,7 @@ export function ImportView({
                 category={r.categoryId ? catById.get(r.categoryId) : undefined}
                 onCategory={(id) => setCategory(r.key, id)}
                 onToggle={() => toggleInclude(r.key)}
+                onResolution={(res) => setResolution(r.key, res)}
               />
             ))}
           </div>
@@ -311,7 +396,7 @@ export function ImportView({
           <div className="sticky bottom-4 mt-5 flex gap-2">
             <Button onClick={commit} disabled={busy} size="lg" className="flex-1 shadow-lg">
               {busy && <Loader2 className="size-4 animate-spin" />}
-              אישור ושמירה ({included.length})
+              אישור ושמירה ({actionCount})
             </Button>
             <Button
               variant="outline"
@@ -332,80 +417,138 @@ export function ImportView({
   );
 }
 
+const RESOLUTION_OPTIONS: { value: Resolution; label: string }[] = [
+  { value: "skip", label: "דלג" },
+  { value: "replace", label: "החלף" },
+  { value: "keep", label: "שמור שניהם" },
+];
+
 function ReviewCard({
   row,
   categories,
   category,
   onCategory,
   onToggle,
+  onResolution,
 }: {
   row: ReviewRow;
   categories: Category[];
   category?: Category;
   onCategory: (id: string | null) => void;
   onToggle: () => void;
+  onResolution: (res: Resolution) => void;
 }) {
-  const { parsed, duplicate, include } = row;
-  return (
-    <Card className={duplicate ? "opacity-60" : include ? "" : "opacity-70"}>
-      <CardContent className="flex items-center gap-3 p-3">
-        {!duplicate && (
-          <input
-            type="checkbox"
-            checked={include}
-            onChange={onToggle}
-            className="size-4 accent-primary"
-            aria-label="לכלול בייבוא"
-          />
-        )}
-        <span
-          className="flex size-9 shrink-0 items-center justify-center rounded-lg"
-          style={categoryTintStyle(category?.color ?? "muted-foreground")}
-        >
-          {categoryIconElement(category?.icon)}
-        </span>
+  const { parsed, duplicate, possibleDup, resolution, include } = row;
+  // A possible-dup row is "active" (will be saved) unless left on skip.
+  const active = possibleDup
+    ? resolution !== "skip"
+    : !duplicate && include;
+  // Show the category picker for any row that will be saved.
+  const showCategory = !duplicate && (!possibleDup || resolution !== "skip");
 
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">
-            {parsed.merchant}
-            {parsed.currency && parsed.originalAmount && (
-              <span className="mr-1.5 rounded bg-accent px-1.5 py-0.5 text-[11px] font-normal text-accent-foreground">
-                {foreignLabel(parsed.currency, parsed.originalAmount)}
+  return (
+    <Card
+      className={
+        possibleDup
+          ? active
+            ? "border-warning/60"
+            : "border-warning/40 opacity-70"
+          : duplicate
+            ? "opacity-60"
+            : active
+              ? ""
+              : "opacity-70"
+      }
+    >
+      <CardContent className="flex flex-col gap-2 p-3">
+        <div className="flex items-center gap-3">
+          {!duplicate && !possibleDup && (
+            <input
+              type="checkbox"
+              checked={include}
+              onChange={onToggle}
+              className="size-4 accent-primary"
+              aria-label="לכלול בייבוא"
+            />
+          )}
+          <span
+            className="flex size-9 shrink-0 items-center justify-center rounded-lg"
+            style={categoryTintStyle(category?.color ?? "muted-foreground")}
+          >
+            {categoryIconElement(category?.icon)}
+          </span>
+
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium">
+              {parsed.merchant}
+              {parsed.currency && parsed.originalAmount && (
+                <span className="mr-1.5 rounded bg-accent px-1.5 py-0.5 text-[11px] font-normal text-accent-foreground">
+                  {foreignLabel(parsed.currency, parsed.originalAmount)}
+                </span>
+              )}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {formatDate(parsed.occurredOn)}
+              {parsed.rawCategory ? ` · ${parsed.rawCategory}` : ""}
+            </p>
+            {showCategory && (
+              <select
+                value={row.categoryId ?? ""}
+                onChange={(e) => onCategory(e.target.value || null)}
+                className={`mt-2 h-7 w-full rounded-md border bg-transparent px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${
+                  row.categoryId ? "border-input" : "border-warning text-warning"
+                }`}
+              >
+                <option value="">— לא מסווג —</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <span className="text-sm font-semibold tabular-nums">
+              {formatILS(parsed.amount)}
+            </span>
+            {duplicate && (
+              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                כבר קיים
               </span>
             )}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {formatDate(parsed.occurredOn)}
-            {parsed.rawCategory ? ` · ${parsed.rawCategory}` : ""}
-          </p>
-          {!duplicate && (
-            <select
-              value={row.categoryId ?? ""}
-              onChange={(e) => onCategory(e.target.value || null)}
-              className={`mt-2 h-7 w-full rounded-md border bg-transparent px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${
-                row.categoryId ? "border-input" : "border-warning text-warning"
-              }`}
-            >
-              <option value="">— לא מסווג —</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          )}
+            {possibleDup && (
+              <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[10px] text-warning">
+                כפילות אפשרית
+              </span>
+            )}
+          </div>
         </div>
 
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          <span className="text-sm font-semibold tabular-nums">
-            {formatILS(parsed.amount)}
-          </span>
-          {duplicate && (
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-              כבר קיים
-            </span>
-          )}
-        </div>
+        {possibleDup && (
+          <div className="rounded-lg bg-warning/10 p-2">
+            <p className="mb-2 text-[11px] text-muted-foreground">
+              קיימת כבר הוצאה זהה (שם, תאריך וסכום). מה לעשות?
+            </p>
+            <div className="flex gap-1">
+              {RESOLUTION_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => onResolution(opt.value)}
+                  className={`flex-1 rounded-md border px-2 py-1 text-xs transition-colors ${
+                    resolution === opt.value
+                      ? "border-primary bg-primary/10 font-medium text-primary"
+                      : "border-border text-muted-foreground hover:bg-accent"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
