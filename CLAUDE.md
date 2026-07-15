@@ -40,6 +40,8 @@ insights. Personal use.
 - Dashboard "total expenses" includes uncategorized spending (all non-saving txns).
 - Next 16: async request APIs (`await cookies()`, `params`, `searchParams`); `next lint` removed. **Never pass a function prop from a Server Component to a Client Component** (crashes) — pass serializable data (e.g. `MonthNav` takes `basePath` + `params`).
 - Client-side Supabase mutations with optimistic UI + `router.refresh()`, matching the existing pattern.
+- **A client view seeded from a server prop (`useState(initial)`) must re-sync when that prop changes on `?searchParams` navigation** — the client instance persists across the transition, so `useState` alone freezes the data. `TransactionsView` resets `txns` during render when a `month|category` key changes (past bug: changing months moved the picker but not the expenses).
+- **Every `(app)` route has a `loading.tsx` skeleton** so tab navigation shows instant feedback while the server round-trips to Supabase (each dynamic page = several sequential auth+query RTs; ~2s on local dev, fast in prod). Add one for any new route.
 
 ## Status
 Roadmap stages 0–6 done + settings, recurring, PWA, deploy. Deployed at Vercel (repo `github.com/Vikmoose223/Budgetio`). Full plan: `~/.claude/plans/mighty-leaping-moth.md` (local).

@@ -69,6 +69,19 @@ export function TransactionsView({
   const [submitting, setSubmitting] = useState(false);
   const [query, setQuery] = useState("");
 
+  // When the month or category filter changes, the server component re-fetches
+  // and passes fresh `initial`. This client component instance persists across
+  // that navigation, so we must adopt the new server data — otherwise the list
+  // stays frozen on the month it first mounted with (past bug: changing months
+  // moved the picker but not the expenses). Reset during render (React's
+  // recommended pattern) so there's no stale flash.
+  const dataKey = `${month}|${categoryFilter?.id ?? ""}`;
+  const [syncedKey, setSyncedKey] = useState(dataKey);
+  if (syncedKey !== dataKey) {
+    setSyncedKey(dataKey);
+    setTxns(initial);
+  }
+
   const catById = useMemo(
     () => new Map(categories.map((c) => [c.id, c])),
     [categories],
