@@ -26,6 +26,7 @@ type Match = {
   market: string;
   price: number | null;
   currency: string | null;
+  exchange?: string | null;
 };
 
 /**
@@ -112,7 +113,7 @@ export function HoldingRow({
                 ? "XRP, BTC, SOL…"
                 : value.market === "tase"
                   ? "TEVA, POLI…"
-                  : "VOO, AAPL…"
+                  : "VOO, CSPX, EQQQ, AAPL…"
             }
             dir="ltr"
             className="min-w-0 flex-1 text-left"
@@ -168,7 +169,8 @@ export function HoldingRow({
                 <span className="min-w-0">
                   <span className="block truncate text-sm">{m.name}</span>
                   <span className="block truncate text-xs text-muted-foreground" dir="ltr">
-                    {m.ticker} · {m.symbol}
+                    {m.symbol}
+                    {m.exchange ? ` · ${m.exchange}` : ""}
                   </span>
                 </span>
                 {m.price !== null && (
@@ -217,8 +219,8 @@ export function HoldingRow({
             }}
             className={cn(SELECT_CLASS)}
           >
-            <option value="us">מניות חו״ל</option>
-            <option value="tase">מניות ת״א</option>
+            <option value="us">מניות וקרנות סל</option>
+            <option value="tase">ת״א (בורסה ישראלית)</option>
             <option value="crypto">קריפטו</option>
           </select>
         </div>

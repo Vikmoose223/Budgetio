@@ -11,7 +11,14 @@ import { formatILS, formatDate, todayISO } from "@/lib/format";
 import type { ValuedPosition } from "@/lib/networth/positions";
 import { HoldingRow, type HoldingValue } from "./holding-row";
 import { toast } from "sonner";
-import { Plus, Loader2, Trash2, TrendingUp, TrendingDown } from "lucide-react";
+import {
+  Plus,
+  Loader2,
+  Trash2,
+  TrendingUp,
+  TrendingDown,
+  CalendarSearch,
+} from "lucide-react";
 
 const SELECT_CLASS =
   "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-base outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30";
@@ -64,8 +71,54 @@ export function TradesEditor({
   const [isOpening, setIsOpening] = useState(trades.length === 0);
   const [err, setErr] = useState<string | null>(null);
 
+  const [fetchingPrice, setFetchingPrice] = useState(false);
+  const [priceNote, setPriceNote] = useState<string | null>(null);
+
   const numeric = (v: string) =>
     v.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1");
+
+  /**
+   * Look up what the security actually cost on the trade date, so the price
+   * doesn't have to be remembered or dug out of a statement. The currency is
+   * taken from the quote — CSPX trades in USD on the LSE, so guessing it from
+   * the exchange would be wrong.
+   */
+  async function fillPriceFromDate() {
+    if (!holding.symbol.trim()) {
+      setErr("קודם בחרו נייר דרך החיפוש.");
+      return;
+    }
+    setFetchingPrice(true);
+    setPriceNote(null);
+    setErr(null);
+    try {
+      const res = await fetch(
+        `/api/net-worth/lookup?q=${encodeURIComponent(holding.symbol)}&market=${
+          holding.market
+        }&date=${occurredOn}`,
+      );
+      const data = await res.json();
+      const h = data.historical;
+      if (!h) {
+        setPriceNote("לא נמצא מחיר לתאריך הזה. הזינו ידנית.");
+        return;
+      }
+      // TASE quotes arrive in agorot; a trade is stored in shekels, matching
+      // what was actually paid.
+      const isAgorot = h.currency === "ILA";
+      setPrice(String(isAgorot ? h.price / 100 : h.price));
+      setCurrency(isAgorot ? "ILS" : h.currency);
+      setPriceNote(
+        h.as_of === occurredOn
+          ? `מחיר הסגירה ב-${formatDate(h.as_of)}`
+          : `השוק היה סגור — נלקח מחיר הסגירה מ-${formatDate(h.as_of)}`,
+      );
+    } catch {
+      setPriceNote("משיכת המחיר נכשלה. הזינו ידנית.");
+    } finally {
+      setFetchingPrice(false);
+    }
+  }
 
   function reset() {
     setHolding({ symbol: "", quantity: "", market: "us" });
@@ -137,8 +190,55 @@ export function TradesEditor({
 
   const open = positions.filter((p) => p.quantity > 0);
 
+  // Account-level roll-up: what the whole portfolio cost and what it's worth.
+  const totalCost = open.reduce((sum, p) => sum + (p.costBasisILS ?? 0), 0);
+  const totalValue = open.reduce((sum, p) => sum + (p.marketValue ?? 0), 0);
+  const totalRealized = positions.reduce((sum, p) => sum + p.realizedPnl, 0);
+  const anyPriced = open.some((p) => p.marketValue !== null);
+  const totalPnl = anyPriced ? totalValue - totalCost : null;
+  const totalPct = totalPnl !== null && totalCost > 0 ? totalPnl / totalCost : null;
+
   return (
     <div className="flex flex-col gap-4">
+      {/* --- Account roll-up ------------------------------------------------ */}
+      {open.length > 0 && totalCost > 0 && (
+        <div className="rounded-lg bg-muted/50 p-3">
+          <div className="flex items-baseline justify-between">
+            <span className="text-xs text-muted-foreground">עלות כוללת</span>
+            <span className="text-sm tabular-nums">{formatILS(totalCost)}</span>
+          </div>
+          <div className="mt-1 flex items-baseline justify-between">
+            <span className="text-xs text-muted-foreground">שווי היום</span>
+            <span className="text-sm font-medium tabular-nums">
+              {anyPriced ? formatILS(totalValue) : "—"}
+            </span>
+          </div>
+          {totalPnl !== null && (
+            <div
+              className={cn(
+                "mt-2 flex items-center justify-center gap-1 rounded-md py-1.5 text-sm font-semibold",
+                totalPnl >= 0
+                  ? "bg-success/10 text-success"
+                  : "bg-destructive/10 text-destructive",
+              )}
+            >
+              {totalPnl >= 0 ? (
+                <TrendingUp className="size-4" />
+              ) : (
+                <TrendingDown className="size-4" />
+              )}
+              {formatILS(Math.abs(totalPnl))}
+              {totalPct !== null && ` (${(totalPct * 100).toFixed(1)}%)`}
+            </div>
+          )}
+          {totalRealized !== 0 && (
+            <p className="mt-1 text-center text-xs text-muted-foreground">
+              בנוסף לרווח שכבר מומש: {formatILS(totalRealized)}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* --- Positions ------------------------------------------------------ */}
       {open.length === 0 ? (
         <p className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">
@@ -277,14 +377,34 @@ export function TradesEditor({
           <div className="grid grid-cols-3 gap-2">
             <div className="flex flex-col gap-1.5">
               <Label className="text-xs">מחיר ליחידה</Label>
-              <Input
-                value={price}
-                onChange={(e) => setPrice(numeric(e.target.value))}
-                placeholder="0"
-                inputMode="decimal"
-                dir="ltr"
-                className="text-left"
-              />
+              <div className="flex items-center gap-1">
+                <Input
+                  value={price}
+                  onChange={(e) => {
+                    setPrice(numeric(e.target.value));
+                    setPriceNote(null);
+                  }}
+                  placeholder="0"
+                  inputMode="decimal"
+                  dir="ltr"
+                  className="min-w-0 flex-1 text-left"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={fillPriceFromDate}
+                  disabled={fetchingPrice}
+                  aria-label="משיכת המחיר בתאריך הקנייה"
+                  title="משיכת המחיר בתאריך שנבחר"
+                >
+                  {fetchingPrice ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <CalendarSearch className="size-4" />
+                  )}
+                </Button>
+              </div>
             </div>
             <div className="flex flex-col gap-1.5">
               <Label className="text-xs">מטבע</Label>
@@ -328,6 +448,9 @@ export function TradesEditor({
             </label>
           )}
 
+          {priceNote && (
+            <p className="text-xs text-muted-foreground">{priceNote}</p>
+          )}
           {err && <p className="text-sm text-destructive">{err}</p>}
 
           <div className="flex gap-2">

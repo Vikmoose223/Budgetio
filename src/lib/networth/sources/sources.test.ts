@@ -1,6 +1,14 @@
 import { expect, test, describe } from "vitest";
 import { parseFundYields, parseFundOptions, fundHistoryUrl } from "./gemelnet";
-import { parseQuote, parseCoinPrices, parseCoinSearch } from "./prices";
+import {
+  parseQuote,
+  parseCoinPrices,
+  parseCoinSearch,
+  parseEquitySearch,
+  parseHistoricalQuote,
+  parseCoinHistory,
+  coinHistoryUrl,
+} from "./prices";
 import { parseFx } from "./fx";
 import { parseCpi, cpiRatio } from "./cpi";
 
@@ -197,6 +205,159 @@ describe("parseQuote", () => {
     expect(
       parseQuote({ chart: { result: [{ meta: { symbol: "X" } }] } }, "us", "2026-07-30"),
     ).toBeNull();
+  });
+});
+
+describe("parseEquitySearch", () => {
+  // Trimmed from the real /v1/finance/search?q=CSPX response on 2026-07-31.
+  const CSPX_SEARCH = {
+    quotes: [
+      {
+        symbol: "CSPX.L",
+        exchange: "LSE",
+        shortname: "ISHARES VII PLC ISHRS CORE S&P",
+        quoteType: "ETF",
+      },
+      {
+        symbol: "CSPX.AS",
+        exchange: "AMS",
+        longname: "iShares Core S&P 500 UCITS ETF USD (Acc)",
+        quoteType: "ETF",
+      },
+      { symbol: "^GSPC", exchange: "SNP", shortname: "S&P 500", quoteType: "INDEX" },
+      { symbol: "EURUSD=X", exchange: "CCY", shortname: "EUR/USD", quoteType: "CURRENCY" },
+    ],
+  };
+
+  test("finds listings the bare ticker never could", () => {
+    // CSPX is on the LSE and Amsterdam — quoting "CSPX" alone finds neither.
+    const matches = parseEquitySearch(CSPX_SEARCH);
+    expect(matches.map((m) => m.symbol)).toEqual(["CSPX.L", "CSPX.AS"]);
+  });
+
+  test("keeps the exchange so the right listing can be chosen", () => {
+    const matches = parseEquitySearch(CSPX_SEARCH);
+    expect(matches[0].exchange).toBe("LSE");
+    expect(matches[1].exchange).toBe("AMS");
+  });
+
+  test("prefers the long name when there is one", () => {
+    const matches = parseEquitySearch(CSPX_SEARCH);
+    expect(matches[1].name).toBe("iShares Core S&P 500 UCITS ETF USD (Acc)");
+  });
+
+  test("drops indices and currencies, which can't be held", () => {
+    const symbols = parseEquitySearch(CSPX_SEARCH).map((m) => m.symbol);
+    expect(symbols).not.toContain("^GSPC");
+    expect(symbols).not.toContain("EURUSD=X");
+  });
+
+  test("a .TA symbol is tagged as the Tel Aviv market", () => {
+    const [m] = parseEquitySearch({
+      quotes: [{ symbol: "TEVA.TA", exchange: "TLV", shortname: "Teva", quoteType: "EQUITY" }],
+    });
+    expect(m.market).toBe("tase");
+  });
+
+  test("malformed payloads are empty, never a throw", () => {
+    expect(parseEquitySearch(null)).toEqual([]);
+    expect(parseEquitySearch({ quotes: "nope" })).toEqual([]);
+    expect(parseEquitySearch({ quotes: [{ exchange: "LSE" }] })).toEqual([]);
+  });
+});
+
+describe("parseHistoricalQuote", () => {
+  // Real shape, three consecutive trading days around 2026-03-16.
+  const HISTORY = {
+    chart: {
+      error: null,
+      result: [
+        {
+          meta: { currency: "USD", symbol: "CSPX.L" },
+          timestamp: [
+            Math.floor(Date.UTC(2026, 2, 16) / 1000),
+            Math.floor(Date.UTC(2026, 2, 17) / 1000),
+            Math.floor(Date.UTC(2026, 2, 18) / 1000),
+          ],
+          indicators: { quote: [{ close: [717.87, 721.96, 716.48] }] },
+        },
+      ],
+    },
+  };
+
+  test("returns the close on the requested day", () => {
+    const h = parseHistoricalQuote(HISTORY, "2026-03-16");
+    expect(h?.price).toBeCloseTo(717.87, 4);
+    expect(h?.currency).toBe("USD");
+    expect(h?.as_of).toBe("2026-03-16");
+  });
+
+  test("falls back to the last trading day before a closed market", () => {
+    // 2026-03-19 has no bar; the 18th is the most recent one.
+    const h = parseHistoricalQuote(HISTORY, "2026-03-19");
+    expect(h?.as_of).toBe("2026-03-18");
+    expect(h?.price).toBeCloseTo(716.48, 4);
+  });
+
+  test("never reaches forward past the requested date", () => {
+    // Pricing a purchase with a later close would use information that
+    // didn't exist when the trade happened.
+    const h = parseHistoricalQuote(HISTORY, "2026-03-17");
+    expect(h?.as_of).toBe("2026-03-17");
+    expect(h?.price).toBeCloseTo(721.96, 4);
+  });
+
+  test("nothing before the requested date yields null", () => {
+    expect(parseHistoricalQuote(HISTORY, "2026-01-01")).toBeNull();
+  });
+
+  test("null closes (halted days) are skipped", () => {
+    const withGap = {
+      chart: {
+        result: [
+          {
+            meta: { currency: "USD" },
+            timestamp: [
+              Math.floor(Date.UTC(2026, 2, 16) / 1000),
+              Math.floor(Date.UTC(2026, 2, 17) / 1000),
+            ],
+            indicators: { quote: [{ close: [700, null] }] },
+          },
+        ],
+      },
+    };
+    const h = parseHistoricalQuote(withGap, "2026-03-17");
+    expect(h?.as_of).toBe("2026-03-16");
+    expect(h?.price).toBe(700);
+  });
+
+  test("malformed payloads are null", () => {
+    expect(parseHistoricalQuote(null, "2026-03-16")).toBeNull();
+    expect(parseHistoricalQuote({ chart: { error: { code: "x" } } }, "2026-03-16")).toBeNull();
+  });
+});
+
+describe("coinHistoryUrl / parseCoinHistory", () => {
+  test("formats the date as CoinGecko's DD-MM-YYYY", () => {
+    // Easy to get subtly wrong, and a swapped day/month silently returns the
+    // price from a different day rather than an error.
+    expect(coinHistoryUrl("ripple", "2026-03-16")).toContain("date=16-03-2026");
+  });
+
+  test("reads the ILS price", () => {
+    const h = parseCoinHistory(
+      { market_data: { current_price: { ils: 4.5535, usd: 1.4582 } } },
+      "2026-03-16",
+    );
+    expect(h?.price).toBeCloseTo(4.5535, 4);
+    expect(h?.currency).toBe("ILS");
+    expect(h?.as_of).toBe("2026-03-16");
+  });
+
+  test("a payload without an ILS price is null", () => {
+    expect(parseCoinHistory({ market_data: { current_price: { usd: 1 } } }, "2026-03-16"))
+      .toBeNull();
+    expect(parseCoinHistory(null, "2026-03-16")).toBeNull();
   });
 });
 
