@@ -316,9 +316,18 @@ export default async function NetWorthPage() {
   );
   // Whether that timestamp counts as stale is decided on the client — reading
   // the clock during render is impure.
-  const hasAutoPriced = (holdingRows ?? []).length > 0;
-  // Anything held but unpriced needs a fetch no matter how fresh the cache is.
-  const hasUnpriced = valuedAccounts.some((a) => a.unpricedSymbols.length > 0);
+  // A fund-linked account has no holdings, so gating the refresher on holdings
+  // alone meant a household with only a pension never fetched anything at all.
+  const fundLinked = accounts.filter((a) => a.fund_id !== null && a.fund_source);
+  const hasAutoPriced = (holdingRows ?? []).length > 0 || fundLinked.length > 0;
+
+  // Anything we should be able to value but can't needs a fetch regardless of
+  // how fresh the rest of the cache looks.
+  const missingYields = fundLinked.some(
+    (a) => (yieldsByFund.get(`${a.fund_source}:${a.fund_id}`) ?? []).length === 0,
+  );
+  const hasUnpriced =
+    valuedAccounts.some((a) => a.unpricedSymbols.length > 0) || missingYields;
 
   const feeByAccountId = new Map<string, number>();
   for (const a of accounts) {

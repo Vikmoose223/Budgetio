@@ -8,6 +8,7 @@ import { todayISO } from "@/lib/format";
 import { ASSET_KIND_LABELS } from "@/lib/networth/summary";
 import type { AssetKind } from "@/lib/networth/value";
 import { HoldingRow, type HoldingValue } from "./holding-row";
+import { FundPicker } from "./fund-picker";
 import { Loader2, Trash2, Plus } from "lucide-react";
 
 const SELECT_CLASS =
@@ -27,6 +28,8 @@ export type AssetValues = {
   currency: "ILS" | "USD" | "EUR";
   fundId: string;
   fundSource: "gemel" | "pension" | "";
+  /** Display name of the linked fund; not persisted, resolved from fund_id. */
+  fundName?: string;
   balance: string;
   balanceAsOf: string;
   holdings: HoldingValue[];
@@ -57,6 +60,7 @@ export function AssetForm({
   const [fundSource, setFundSource] = useState<"gemel" | "pension" | "">(
     initial?.fundSource ?? "",
   );
+  const [fundName, setFundName] = useState<string | undefined>(initial?.fundName);
   const [balance, setBalance] = useState(initial?.balance ?? "");
   const [balanceAsOf, setBalanceAsOf] = useState(
     initial?.balanceAsOf ?? todayISO(),
@@ -105,6 +109,7 @@ export function AssetForm({
       currency,
       fundId: fundId.trim(),
       fundSource,
+      fundName,
       balance,
       balanceAsOf,
       holdings: holdings.filter((h) => h.symbol.trim()),
@@ -191,35 +196,16 @@ export function AssetForm({
       ) : null}
 
       {usesFund && (
-        <div className="grid grid-cols-2 gap-3">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="fund-id">מספר קופה (לא חובה)</Label>
-            <Input
-              id="fund-id"
-              value={fundId}
-              onChange={(e) => setFundId(e.target.value.replace(/\D/g, ""))}
-              placeholder="למשל: 101"
-              inputMode="numeric"
-              dir="ltr"
-            />
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="fund-source">מאגר</Label>
-            <select
-              id="fund-source"
-              value={fundSource}
-              onChange={(e) => setFundSource(e.target.value as "gemel" | "pension" | "")}
-              className={SELECT_CLASS}
-            >
-              <option value="">ללא</option>
-              <option value="gemel">גמל־נט</option>
-              <option value="pension">פנסיה־נט</option>
-            </select>
-          </div>
-          <p className="col-span-2 -mt-1 text-xs text-muted-foreground">
-            עם מספר קופה, השווי יתעדכן לפי התשואות הרשמיות שמתפרסמות מדי חודש.
-          </p>
-        </div>
+        <FundPicker
+          fundId={fundId}
+          fundName={fundName}
+          fundSource={fundSource}
+          onChange={(v) => {
+            setFundId(v.fundId);
+            setFundSource(v.fundSource);
+            setFundName(v.fundName);
+          }}
+        />
       )}
 
       <div className="grid grid-cols-2 gap-3">

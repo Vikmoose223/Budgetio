@@ -1,5 +1,10 @@
 import { expect, test, describe } from "vitest";
-import { parseFundYields, parseFundOptions, fundHistoryUrl } from "./gemelnet";
+import {
+  parseFundYields,
+  parseFundOptions,
+  fundHistoryUrl,
+  fundSearchUrl,
+} from "./gemelnet";
 import {
   parseQuote,
   parseCoinPrices,
@@ -117,6 +122,22 @@ describe("parseFundOptions", () => {
     const options = parseFundOptions(GEMELNET_PAYLOAD, "gemel");
     expect(options).toHaveLength(2);
     expect(options.map((o) => o.fund_id).sort()).toEqual([101, 202]);
+  });
+});
+
+describe("fundSearchUrl", () => {
+  test("searches by name rather than requiring the internal id", () => {
+    // Nobody knows their fund's FUND_ID — the number on a statement is a
+    // policy number. Search by name is the only workable entry point.
+    const url = fundSearchUrl("מיטב", "gemel");
+    expect(decodeURIComponent(url)).toContain("q=מיטב");
+    expect(url).toContain("resource_id=a30dcbea-a1d2-482c-ae29-8f781f5025fb");
+  });
+
+  test("pension searches hit the pension dataset", () => {
+    expect(fundSearchUrl("מנורה", "pension")).toContain(
+      "6d47d6b5-cb08-488b-b333-f1e717b1e1bd",
+    );
   });
 });
 

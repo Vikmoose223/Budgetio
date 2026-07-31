@@ -119,6 +119,47 @@ export function latestYieldsUrl(source: FundSource, limit = 5000): string {
   return `${CKAN_BASE}?${params.toString()}`;
 }
 
+/**
+ * Free-text search over fund names.
+ *
+ * Nobody knows their fund's gemel-net FUND_ID — the number on your statement
+ * is a policy or member number, not this. So the app has to find the fund by
+ * name ("מיטב גמל לבני 50 עד 60" is 103) rather than asking for an id.
+ */
+export function fundSearchUrl(
+  query: string,
+  source: FundSource,
+  limit = 300,
+): string {
+  const params = new URLSearchParams({
+    resource_id: FUND_RESOURCES[source],
+    q: query,
+    limit: String(limit),
+    sort: "REPORT_PERIOD desc",
+  });
+  return `${CKAN_BASE}?${params.toString()}`;
+}
+
+/**
+ * Search funds by name. Each fund appears once per reported month, so the
+ * results are deduplicated down to distinct funds.
+ */
+export async function searchFunds(
+  query: string,
+  source: FundSource,
+): Promise<FundOption[]> {
+  if (query.trim().length < 2) return [];
+  try {
+    const res = await fetch(fundSearchUrl(query.trim(), source), {
+      next: { revalidate: 60 * 60 * 24 },
+    });
+    if (!res.ok) return [];
+    return parseFundOptions(await res.json(), source);
+  } catch {
+    return [];
+  }
+}
+
 /** Fetch one fund's recent monthly yields. Returns [] on any failure. */
 export async function fetchFundHistory(
   fundId: number,

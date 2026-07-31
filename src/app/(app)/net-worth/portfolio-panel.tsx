@@ -186,19 +186,25 @@ export function PortfolioPanel({
       setAssetOpen(false);
       setEditingAsset(null);
 
-      // Price the new symbols now rather than leaving it to the page-level
-      // refresher, which only fires on its own schedule. Without this a
-      // freshly-added holding shows no value until something else happens to
-      // trigger a fetch, which reads as "it didn't work".
-      if (v.holdings.length > 0) {
+      // Fetch straight away rather than leaving it to the page-level
+      // refresher, which only fires on its own schedule. This covers linked
+      // funds as well as holdings: a gemel account has no holdings, so gating
+      // this on holdings alone meant its published returns were never fetched
+      // and the link silently did nothing.
+      const needsFetch = v.holdings.length > 0 || (v.fundId !== "" && v.fundSource !== "");
+      if (needsFetch) {
         toast.success(editingAsset ? "החשבון עודכן" : "החשבון נוסף");
         try {
           const res = await fetch("/api/net-worth/refresh", { method: "POST" });
           const data = await res.json().catch(() => null);
           if (data?.failed?.length) {
             toast.error(`לא נמשך מחיר עבור ${data.failed.join(", ")}`);
+          } else if (data?.yields > 0) {
+            toast.success("תשואות הקופה נמשכו");
           } else if (data?.prices > 0) {
             toast.success("המחירים עודכנו");
+          } else if (v.fundId) {
+            toast.error("לא נמצאו תשואות לקופה שנבחרה");
           }
         } catch {
           toast.error("משיכת המחירים נכשלה — נסו את כפתור הרענון");
@@ -405,7 +411,11 @@ export function PortfolioPanel({
                 warning={
                   a.unpricedSymbols.length > 0
                     ? `ללא מחיר: ${a.unpricedSymbols.join(", ")}`
-                    : null
+                    : // A fund is linked but no published returns came back, so
+                      // the value silently isn't drifting. Say so.
+                      seedFor(a.id)?.fund_id && a.basis === "anchor"
+                      ? "הקופה מקושרת אך לא נמצאו תשואות — נסו רענון"
+                      : null
                 }
                 onOpen={() => setDetailAsset(a)}
                 onEdit={() => {
