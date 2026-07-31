@@ -13,12 +13,15 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ExpenseForm, type Category, type ExpenseValues } from "./expense-form";
+import { CategorySegments, type Segment } from "./category-segments";
+import { IncomeSection, type Income } from "./income-section";
+import type { Member } from "./income-form";
 import { MonthNav } from "@/components/month-nav";
 import { findDuplicates, type DupExisting } from "@/lib/dedup";
 import { categoryIconElement, categoryTintStyle } from "@/lib/categories";
 import { formatILS, formatDate } from "@/lib/format";
 import { toast } from "sonner";
-import { Plus, Receipt, Search } from "lucide-react";
+import { Plus, Receipt, Search, Repeat } from "lucide-react";
 
 type Txn = {
   id: string;
@@ -28,10 +31,11 @@ type Txn = {
   description: string | null;
   merchant: string | null;
   source: string;
+  is_fixed: boolean;
 };
 
 const TXN_COLS =
-  "id, category_id, occurred_on, amount, description, merchant, source";
+  "id, category_id, occurred_on, amount, description, merchant, source, is_fixed";
 
 function sortByDateDesc(list: Txn[]): Txn[] {
   return [...list].sort((a, b) =>
@@ -56,6 +60,10 @@ export function TransactionsView({
   initial,
   month,
   categoryFilter,
+  segments,
+  monthTotal,
+  incomes,
+  members,
 }: {
   householdId: string;
   userId: string;
@@ -63,6 +71,12 @@ export function TransactionsView({
   initial: Txn[];
   month: string;
   categoryFilter: { id: string; label: string } | null;
+  /** Spending per category for the whole month, independent of the filter. */
+  segments: Segment[];
+  /** Month-wide expense total, used for the income comparison. */
+  monthTotal: number;
+  incomes: Income[];
+  members: Member[];
 }) {
   const [txns, setTxns] = useState<Txn[]>(initial);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -137,6 +151,7 @@ export function TransactionsView({
         merchant: v.merchant || null,
         household_id: householdId,
         source: "manual",
+        is_fixed: v.isFixed,
         created_by: userId,
       })
       .select(TXN_COLS)
@@ -159,6 +174,7 @@ export function TransactionsView({
             amount: parseFloat(v.amount),
             description: v.description || null,
             merchant: v.merchant || null,
+            is_fixed: v.isFixed,
           })
           .eq("id", editing.id)
           .select(TXN_COLS)
@@ -240,6 +256,7 @@ export function TransactionsView({
           amount: parseFloat(v.amount),
           description: v.description || null,
           merchant: v.merchant || null,
+          is_fixed: v.isFixed,
         })
         .eq("id", dupPrompt.existing.id)
         .select(TXN_COLS)
@@ -328,6 +345,22 @@ export function TransactionsView({
         )}
       </div>
 
+      <IncomeSection
+        householdId={householdId}
+        userId={userId}
+        members={members}
+        incomes={incomes}
+        expenseTotal={monthTotal}
+        month={month}
+      />
+
+      <CategorySegments
+        segments={segments}
+        month={month}
+        activeId={categoryFilter?.id ?? null}
+        total={monthTotal}
+      />
+
       {txns.length > 0 && (
         <div className="relative mt-3">
           <Search className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -371,8 +404,16 @@ export function TransactionsView({
                         {categoryIconElement(c?.icon)}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate font-medium">
-                          {t.description || c?.name || "הוצאה"}
+                        <p className="flex items-center gap-1.5 truncate font-medium">
+                          <span className="truncate">
+                            {t.description || c?.name || "הוצאה"}
+                          </span>
+                          {t.is_fixed && (
+                            <span className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+                              <Repeat className="size-2.5" />
+                              קבועה
+                            </span>
+                          )}
                         </p>
                         <p className="truncate text-xs text-muted-foreground">
                           {c?.name ?? "ללא קטגוריה"}
@@ -410,6 +451,7 @@ export function TransactionsView({
                     occurredOn: editing.occurred_on,
                     description: editing.description ?? "",
                     merchant: editing.merchant ?? "",
+                    isFixed: editing.is_fixed,
                   }
                 : undefined
             }

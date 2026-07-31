@@ -5,49 +5,42 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { todayISO } from "@/lib/format";
+import { INCOME_SOURCE_LABELS, type IncomeSource } from "@/lib/income";
 import { Loader2, Trash2 } from "lucide-react";
 
-export type Category = {
-  id: string;
-  name: string;
-  icon: string | null;
-  color: string | null;
-  kind: string;
-};
+const SELECT_CLASS =
+  "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-base outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30";
 
-export type ExpenseValues = {
+export type IncomeValues = {
   amount: string;
-  categoryId: string;
+  source: IncomeSource;
   occurredOn: string;
   description: string;
-  merchant: string;
-  /** Manually marked as a fixed/recurring expense. */
-  isFixed: boolean;
+  ownerProfileId: string;
+  recurring: boolean;
 };
 
-export function ExpenseForm({
-  categories,
+export type Member = { id: string; display_name: string | null };
+
+export function IncomeForm({
+  members,
   initial,
   onSubmit,
   onDelete,
   submitting,
 }: {
-  categories: Category[];
-  initial?: Partial<ExpenseValues>;
-  onSubmit: (v: ExpenseValues) => void;
+  members: Member[];
+  initial?: Partial<IncomeValues>;
+  onSubmit: (v: IncomeValues) => void;
   onDelete?: () => void;
   submitting: boolean;
 }) {
   const [amount, setAmount] = useState(initial?.amount ?? "");
-  const [categoryId, setCategoryId] = useState(
-    initial?.categoryId ?? categories[0]?.id ?? "",
-  );
-  const [occurredOn, setOccurredOn] = useState(
-    initial?.occurredOn ?? todayISO(),
-  );
+  const [source, setSource] = useState<IncomeSource>(initial?.source ?? "salary");
+  const [occurredOn, setOccurredOn] = useState(initial?.occurredOn ?? todayISO());
   const [description, setDescription] = useState(initial?.description ?? "");
-  const [merchant, setMerchant] = useState(initial?.merchant ?? "");
-  const [isFixed, setIsFixed] = useState(initial?.isFixed ?? false);
+  const [ownerProfileId, setOwnerProfileId] = useState(initial?.ownerProfileId ?? "");
+  const [recurring, setRecurring] = useState(initial?.recurring ?? true);
   const [err, setErr] = useState<string | null>(null);
 
   function submit(e: React.FormEvent) {
@@ -57,18 +50,14 @@ export function ExpenseForm({
       setErr("הזינו סכום גדול מאפס.");
       return;
     }
-    if (!categoryId) {
-      setErr("בחרו קטגוריה.");
-      return;
-    }
     setErr(null);
     onSubmit({
       amount,
-      categoryId,
+      source,
       occurredOn,
       description: description.trim(),
-      merchant: merchant.trim(),
-      isFixed,
+      ownerProfileId,
+      recurring,
     });
   }
 
@@ -76,14 +65,16 @@ export function ExpenseForm({
     <form onSubmit={submit} className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-3">
         <div className="flex flex-col gap-2">
-          <Label htmlFor="amount">סכום</Label>
+          <Label htmlFor="income-amount">סכום</Label>
           <div className="relative">
             <Input
-              id="amount"
+              id="income-amount"
               inputMode="decimal"
               value={amount}
               onChange={(e) =>
-                setAmount(e.target.value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1"))
+                setAmount(
+                  e.target.value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1"),
+                )
               }
               placeholder="0"
               className="pl-7 text-left"
@@ -96,9 +87,9 @@ export function ExpenseForm({
           </div>
         </div>
         <div className="flex flex-col gap-2">
-          <Label htmlFor="date">תאריך</Label>
+          <Label htmlFor="income-date">תאריך</Label>
           <Input
-            id="date"
+            id="income-date"
             type="date"
             value={occurredOn}
             onChange={(e) => setOccurredOn(e.target.value)}
@@ -107,51 +98,58 @@ export function ExpenseForm({
         </div>
       </div>
 
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="category">קטגוריה</Label>
-        <select
-          id="category"
-          value={categoryId}
-          onChange={(e) => setCategoryId(e.target.value)}
-          className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-base outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30"
-        >
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="income-source">מקור</Label>
+          <select
+            id="income-source"
+            value={source}
+            onChange={(e) => setSource(e.target.value as IncomeSource)}
+            className={SELECT_CLASS}
+          >
+            {Object.entries(INCOME_SOURCE_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="income-owner">שייך ל</Label>
+          <select
+            id="income-owner"
+            value={ownerProfileId}
+            onChange={(e) => setOwnerProfileId(e.target.value)}
+            className={SELECT_CLASS}
+          >
+            <option value="">משותף</option>
+            {members.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.display_name ?? "בן/בת זוג"}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="description">תיאור</Label>
+        <Label htmlFor="income-description">תיאור</Label>
         <Input
-          id="description"
+          id="income-description"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="למשל: קניות בסופר"
+          placeholder="למשל: משכורת יולי"
         />
       </div>
 
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="merchant">בית עסק (לא חובה)</Label>
-        <Input
-          id="merchant"
-          value={merchant}
-          onChange={(e) => setMerchant(e.target.value)}
-          placeholder="למשל: שופרסל"
-        />
-      </div>
-
-      {/* Explicit override for what detectRecurring can't infer on its own. */}
       <label className="flex items-center gap-2 text-sm">
         <input
           type="checkbox"
-          checked={isFixed}
-          onChange={(e) => setIsFixed(e.target.checked)}
+          checked={recurring}
+          onChange={(e) => setRecurring(e.target.checked)}
           className="size-4 rounded border-input accent-primary"
         />
-        הוצאה קבועה
+        הכנסה חודשית קבועה
       </label>
 
       {err && <p className="text-sm text-destructive">{err}</p>}
