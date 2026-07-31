@@ -37,6 +37,8 @@ export type AccountSeed = {
   fund_source: string | null;
   holdings: { symbol: string; quantity: number; market: string }[];
   latestValuation: { value: number; as_of: string } | null;
+  fundYieldCount: number;
+  latestYieldPeriod: number | null;
   trades: TradeRow[];
   flows: FlowRow[];
   rules: RuleRow[];
@@ -414,13 +416,15 @@ export function PortfolioPanel({
                 warning={
                   a.unpricedSymbols.length > 0
                     ? `ללא מחיר: ${a.unpricedSymbols.join(", ")}`
-                    : // A fund id is stored but no published returns came back.
-                      // Refreshing can't fix a wrong id, so point at the fix
-                      // that can: re-pick the fund from the search.
-                      seedFor(a.id)?.fund_id && a.basis === "anchor"
+                    : // Only a genuinely empty cache is a problem. A fund whose
+                      // published months all predate your balance date is
+                      // working exactly as intended — flagging that as an error
+                      // sent people hunting for a bug that wasn't there.
+                      seedFor(a.id)?.fund_id && seedFor(a.id)?.fundYieldCount === 0
                       ? "לא נמצאו תשואות למזהה השמור — פתחו עריכה ובחרו קופה מהחיפוש"
                       : null
                 }
+                info={fundInfo(seedFor(a.id), a)}
                 onOpen={() => setDetailAsset(a)}
                 onEdit={() => {
                   setEditingAsset(a);
@@ -573,6 +577,30 @@ export function PortfolioPanel({
   );
 }
 
+/**
+ * Explains a linked fund that isn't drifting yet.
+ *
+ * Published returns lag about a month, so a balance entered today has nothing
+ * to apply to it: the newest month on record is older than the anchor. That's
+ * correct behaviour, not a failure, and saying so beats leaving the account
+ * looking inert.
+ */
+function fundInfo(
+  seed: AccountSeed | undefined,
+  a: ValuedAccount,
+): string | null {
+  if (!seed?.fund_id || seed.fundYieldCount === 0) return null;
+  if (a.basis === "drift") return null;
+  const p = seed.latestYieldPeriod;
+  if (p === null) return null;
+  const label = `${String(p % 100).padStart(2, "0")}/${Math.floor(p / 100)}`;
+  const anchor = seed.latestValuation?.as_of;
+  const anchorLabel = anchor ? `${anchor.slice(5, 7)}/${anchor.slice(0, 4)}` : null;
+  return anchorLabel
+    ? `תשואות זמינות עד ${label}, והיתרה נכונה ל-${anchorLabel} — אין עדיין חודש להחיל`
+    : `תשואות זמינות עד ${label}`;
+}
+
 /** Kind, plus the profit figure once contributions are known. */
 function accountSubtitle(a: ValuedAccount): string {
   const parts: string[] = [ASSET_KIND_LABELS[a.kind]];
@@ -612,6 +640,7 @@ function Row({
   badge,
   returnRate,
   warning,
+  info,
   negative,
   onEdit,
   onOpen,
@@ -622,6 +651,8 @@ function Row({
   badge: React.ReactNode;
   returnRate?: number | null;
   warning?: string | null;
+  /** Neutral explanation — not a failure. */
+  info?: string | null;
   negative?: boolean;
   onEdit: () => void;
   /** Opens the detail view (ledger / deposits). Omit for liabilities. */
@@ -645,6 +676,9 @@ function Row({
             <AlertTriangle className="size-3 shrink-0" />
             {warning}
           </p>
+        )}
+        {!warning && info && (
+          <p className="mt-0.5 text-xs text-muted-foreground">{info}</p>
         )}
       </Body>
 

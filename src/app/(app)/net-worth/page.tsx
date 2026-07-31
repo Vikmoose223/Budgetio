@@ -581,6 +581,19 @@ export default async function NetWorthPage() {
           currency: a.currency,
           fund_id: a.fund_id,
           fund_source: a.fund_source,
+          // Whether returns are actually cached for this fund, and how far
+          // they run — "no yields" and "yields older than your balance date"
+          // look identical on screen but mean completely different things.
+          fundYieldCount:
+            a.fund_id !== null && a.fund_source
+              ? (yieldsByFund.get(`${a.fund_source}:${a.fund_id}`) ?? []).length
+              : 0,
+          latestYieldPeriod:
+            a.fund_id !== null && a.fund_source
+              ? ((yieldsByFund.get(`${a.fund_source}:${a.fund_id}`) ?? []).reduce<
+                  number | null
+                >((max, y) => (max === null || y.report_period > max ? y.report_period : max), null))
+              : null,
           holdings: (holdingsBy.get(a.id) ?? []).map((h) => ({
             symbol: h.symbol,
             quantity: Number(h.quantity),
