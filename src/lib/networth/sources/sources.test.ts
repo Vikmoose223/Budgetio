@@ -1,6 +1,6 @@
 import { expect, test, describe } from "vitest";
 import { parseFundYields, parseFundOptions, fundHistoryUrl } from "./gemelnet";
-import { parseQuote, parseCoinPrices } from "./prices";
+import { parseQuote, parseCoinPrices, parseCoinSearch } from "./prices";
 import { parseFx } from "./fx";
 import { parseCpi, cpiRatio } from "./cpi";
 
@@ -197,6 +197,66 @@ describe("parseQuote", () => {
     expect(
       parseQuote({ chart: { result: [{ meta: { symbol: "X" } }] } }, "us", "2026-07-30"),
     ).toBeNull();
+  });
+});
+
+describe("parseCoinSearch", () => {
+  // Trimmed from the real /search?query=xrp response on 2026-07-31.
+  const XRP_SEARCH = {
+    coins: [
+      { id: "army-3", symbol: "ARMY", name: "XRP ARMY", market_cap_rank: 1796 },
+      { id: "ripple", symbol: "XRP", name: "XRP", market_cap_rank: 6 },
+      { id: "xrp-healthcare", symbol: "XRPH", name: "XRP Healthcare", market_cap_rank: 2600 },
+      {
+        id: "harrypotterobamapacman8inu",
+        symbol: "XRP",
+        name: "HarryPotterObamaPacMan8Inu",
+        market_cap_rank: 4646,
+      },
+    ],
+  };
+
+  test("resolves the ticker people type to the id the API needs", () => {
+    const matches = parseCoinSearch(XRP_SEARCH);
+    // This is the whole point: typing "XRP" has to reach "ripple".
+    expect(matches[0].symbol).toBe("ripple");
+    expect(matches[0].ticker).toBe("XRP");
+    expect(matches[0].name).toBe("XRP");
+  });
+
+  test("ranks by market cap so impostors don't win", () => {
+    const matches = parseCoinSearch(XRP_SEARCH);
+    expect(matches.map((m) => m.symbol)).toEqual([
+      "ripple",
+      "army-3",
+      "xrp-healthcare",
+      "harrypotterobamapacman8inu",
+    ]);
+  });
+
+  test("coins with no rank sort last rather than crashing", () => {
+    const matches = parseCoinSearch({
+      coins: [
+        { id: "unranked", symbol: "U", name: "Unranked" },
+        { id: "ranked", symbol: "R", name: "Ranked", market_cap_rank: 3 },
+      ],
+    });
+    expect(matches.map((m) => m.symbol)).toEqual(["ranked", "unranked"]);
+  });
+
+  test("everything is tagged as crypto", () => {
+    expect(parseCoinSearch(XRP_SEARCH).every((m) => m.market === "crypto")).toBe(true);
+  });
+
+  test("respects the result limit", () => {
+    expect(parseCoinSearch(XRP_SEARCH, 2)).toHaveLength(2);
+  });
+
+  test("malformed payloads are empty, never a throw", () => {
+    expect(parseCoinSearch(null)).toEqual([]);
+    expect(parseCoinSearch({})).toEqual([]);
+    expect(parseCoinSearch({ coins: "nope" })).toEqual([]);
+    expect(parseCoinSearch({ coins: [{ symbol: "X" }] })).toEqual([]);
   });
 });
 

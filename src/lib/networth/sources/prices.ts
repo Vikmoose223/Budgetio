@@ -87,6 +87,108 @@ export async function fetchQuote(
   }
 }
 
+/**
+ * Resolving what someone typed into something the APIs accept.
+ *
+ * This matters most for crypto: CoinGecko keys on its own **id**, not the
+ * ticker. Typing "XRP" finds nothing — the id is "ripple". So the symbol box
+ * searches rather than trusting the raw input.
+ */
+export type SymbolMatch = {
+  /** The value to store and later price with. */
+  symbol: string;
+  name: string;
+  /** The ticker as people say it, for display. */
+  ticker: string;
+  market: Market;
+  /** Current price in the quoted currency, when we could get one. */
+  price: number | null;
+  currency: string | null;
+};
+
+export function coinSearchUrl(query: string): string {
+  return `https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(query)}`;
+}
+
+/** Map a CoinGecko `/search` payload to candidates, best-known coins first. */
+export function parseCoinSearch(payload: unknown, limit = 6): SymbolMatch[] {
+  const coins = (payload as { coins?: unknown[] })?.coins;
+  if (!Array.isArray(coins)) return [];
+
+  return coins
+    .map((raw) => {
+      const c = raw as Record<string, unknown>;
+      const id = typeof c.id === "string" ? c.id : null;
+      const name = typeof c.name === "string" ? c.name : null;
+      const ticker = typeof c.symbol === "string" ? c.symbol : "";
+      if (!id || !name) return null;
+      const rank =
+        typeof c.market_cap_rank === "number" ? c.market_cap_rank : Number.MAX_SAFE_INTEGER;
+      return { id, name, ticker, rank };
+    })
+    .filter((c): c is NonNullable<typeof c> => c !== null)
+    // Rank ascending: "XRP" should surface ripple, not "XRP ARMY".
+    .sort((a, b) => a.rank - b.rank)
+    .slice(0, limit)
+    .map((c) => ({
+      symbol: c.id,
+      name: c.name,
+      ticker: c.ticker.toUpperCase(),
+      market: "crypto" as Market,
+      price: null,
+      currency: null,
+    }));
+}
+
+/** Search coins by ticker or name. Empty on failure. */
+export async function searchCoins(query: string): Promise<SymbolMatch[]> {
+  try {
+    const res = await fetch(coinSearchUrl(query), { cache: "no-store" });
+    if (!res.ok) return [];
+    return parseCoinSearch(await res.json());
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Equity lookup: Yahoo has no keyless search endpoint we can rely on, so we
+ * verify the symbol by quoting it directly. Tel Aviv symbols need the `.TA`
+ * suffix, which is added automatically when the bare form doesn't resolve.
+ */
+export async function lookupEquity(
+  query: string,
+  market: "us" | "tase",
+): Promise<SymbolMatch[]> {
+  const raw = query.trim().toUpperCase();
+  if (!raw) return [];
+
+  const candidates =
+    market === "tase"
+      ? raw.endsWith(".TA")
+        ? [raw]
+        : [`${raw}.TA`, raw]
+      : [raw];
+
+  const asOf = new Date().toISOString().slice(0, 10);
+  for (const candidate of candidates) {
+    const quote = await fetchQuote(candidate, market, asOf);
+    if (quote) {
+      return [
+        {
+          symbol: quote.symbol,
+          name: quote.symbol,
+          ticker: quote.symbol,
+          market,
+          price: quote.price,
+          currency: quote.currency,
+        },
+      ];
+    }
+  }
+  return [];
+}
+
 /** Fetch crypto prices in one call. Empty on failure. */
 export async function fetchCoinPrices(
   ids: string[],

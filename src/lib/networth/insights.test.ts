@@ -29,6 +29,10 @@ const liability = (over: Partial<ValuedLiability> = {}): ValuedLiability => ({
   monthlyPayment: 5000,
   monthsRemaining: 150,
   interestPaid: 0,
+  loanType: "spitzer",
+  inGrace: false,
+  balloonDue: null,
+  rate: 4,
   ...over,
 });
 

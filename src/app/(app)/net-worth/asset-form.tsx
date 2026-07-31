@@ -7,7 +7,8 @@ import { Label } from "@/components/ui/label";
 import { todayISO } from "@/lib/format";
 import { ASSET_KIND_LABELS } from "@/lib/networth/summary";
 import type { AssetKind } from "@/lib/networth/value";
-import { Loader2, Trash2, Plus, X } from "lucide-react";
+import { HoldingRow, type HoldingValue } from "./holding-row";
+import { Loader2, Trash2, Plus } from "lucide-react";
 
 const SELECT_CLASS =
   "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-base outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30";
@@ -17,11 +18,7 @@ const HOLDING_KINDS: AssetKind[] = ["brokerage", "crypto"];
 /** Kinds that can be linked to a published fund for automatic drift. */
 const FUND_KINDS: AssetKind[] = ["pension", "gemel", "hishtalmut"];
 
-export type HoldingValue = {
-  symbol: string;
-  quantity: string;
-  market: "us" | "tase" | "crypto";
-};
+export type { HoldingValue };
 
 export type AssetValues = {
   name: string;
@@ -81,9 +78,18 @@ export function AssetForm({
       return;
     }
     if (usesHoldings) {
-      const bad = holdings.find((h) => h.symbol.trim() && !parseFloat(h.quantity));
-      if (bad) {
-        setErr(`הזינו כמות עבור ${bad.symbol}.`);
+      // A row with a quantity but no resolved symbol would silently vanish on
+      // save, so block it rather than drop it.
+      const unresolved = holdings.findIndex(
+        (h) => !h.symbol.trim() && (h.label?.trim() || h.quantity.trim()),
+      );
+      if (unresolved !== -1) {
+        setErr("יש אחזקה שלא אומתה — לחצו על החיפוש ובחרו את הנייר.");
+        return;
+      }
+      const missingQty = holdings.find((h) => h.symbol.trim() && !parseFloat(h.quantity));
+      if (missingQty) {
+        setErr(`הזינו כמות עבור ${missingQty.label ?? missingQty.symbol}.`);
         return;
       }
     }
@@ -156,59 +162,16 @@ export function AssetForm({
         <div className="flex flex-col gap-2">
           <Label>אחזקות</Label>
           <p className="-mt-1 text-xs text-muted-foreground">
-            טיקר וכמות — השווי יתעדכן אוטומטית לפי מחירי השוק. לת״א הוסיפו סיומת
-            <span dir="ltr"> .TA</span> (למשל <span dir="ltr">TEVA.TA</span>), לקריפטו
-            השתמשו במזהה CoinGecko (למשל <span dir="ltr">bitcoin</span>).
+            הקלידו את הנייר ולחצו חיפוש — נאמת אותו מול השוק ונמשוך את המחיר. השווי
+            יתעדכן מעצמו מכאן והלאה.
           </p>
           {holdings.map((h, i) => (
-            <div key={i} className="flex items-end gap-2">
-              <div className="flex-1">
-                <Input
-                  value={h.symbol}
-                  onChange={(e) => updateHolding(i, { symbol: e.target.value })}
-                  placeholder="VOO"
-                  dir="ltr"
-                  aria-label="טיקר"
-                />
-              </div>
-              <div className="w-24">
-                <Input
-                  value={h.quantity}
-                  onChange={(e) =>
-                    updateHolding(i, {
-                      quantity: e.target.value
-                        .replace(/[^\d.]/g, "")
-                        .replace(/(\..*)\./g, "$1"),
-                    })
-                  }
-                  placeholder="כמות"
-                  inputMode="decimal"
-                  dir="ltr"
-                  aria-label="כמות"
-                />
-              </div>
-              <select
-                value={h.market}
-                onChange={(e) =>
-                  updateHolding(i, { market: e.target.value as HoldingValue["market"] })
-                }
-                className={`${SELECT_CLASS} w-24`}
-                aria-label="שוק"
-              >
-                <option value="us">חו״ל</option>
-                <option value="tase">ת״א</option>
-                <option value="crypto">קריפטו</option>
-              </select>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={() => setHoldings((p) => p.filter((_, idx) => idx !== i))}
-                aria-label="הסרה"
-              >
-                <X className="size-4" />
-              </Button>
-            </div>
+            <HoldingRow
+              key={i}
+              value={h}
+              onChange={(patch) => updateHolding(i, patch)}
+              onRemove={() => setHoldings((p) => p.filter((_, idx) => idx !== i))}
+            />
           ))}
           <Button
             type="button"

@@ -23,6 +23,10 @@ export type Currency = "ILS" | "USD" | "EUR";
 export type Market = "us" | "tase" | "crypto";
 export type FundSource = "gemel" | "pension";
 
+// Mirrors the check constraints in 0006_loan_types_and_prime.sql.
+export type LoanType = "spitzer" | "grace" | "balloon" | "none";
+export type RateType = "fixed" | "prime";
+
 // Mirrors the check constraint in 0005_income_and_fixed.sql.
 export type IncomeSource =
   | "salary"
@@ -38,9 +42,9 @@ export type Database = {
   public: {
     Tables: {
       households: {
-        Row: { id: string; name: string; invite_code: string; month_start_day: number; created_at: Timestamp };
-        Insert: { id?: string; name: string; invite_code?: string; month_start_day?: number; created_at?: Timestamp };
-        Update: { id?: string; name?: string; invite_code?: string; month_start_day?: number; created_at?: Timestamp };
+        Row: { id: string; name: string; invite_code: string; month_start_day: number; prime_rate: number; created_at: Timestamp };
+        Insert: { id?: string; name: string; invite_code?: string; month_start_day?: number; prime_rate?: number; created_at?: Timestamp };
+        Update: { id?: string; name?: string; invite_code?: string; month_start_day?: number; prime_rate?: number; created_at?: Timestamp };
         Relationships: [];
       };
       profiles: {
@@ -395,6 +399,11 @@ export type Database = {
           balance_override: number | null;
           balance_override_as_of: string | null;
           linked_asset_id: string | null;
+          loan_type: LoanType;
+          grace_months: number;
+          capitalize_interest: boolean;
+          rate_type: RateType;
+          prime_margin: number;
           notes: string | null;
           sort_order: number;
           archived: boolean;
@@ -416,6 +425,11 @@ export type Database = {
           balance_override?: number | null;
           balance_override_as_of?: string | null;
           linked_asset_id?: string | null;
+          loan_type?: LoanType;
+          grace_months?: number;
+          capitalize_interest?: boolean;
+          rate_type?: RateType;
+          prime_margin?: number;
           notes?: string | null;
           sort_order?: number;
           archived?: boolean;
@@ -437,6 +451,11 @@ export type Database = {
           balance_override?: number | null;
           balance_override_as_of?: string | null;
           linked_asset_id?: string | null;
+          loan_type?: LoanType;
+          grace_months?: number;
+          capitalize_interest?: boolean;
+          rate_type?: RateType;
+          prime_margin?: number;
           notes?: string | null;
           sort_order?: number;
           archived?: boolean;

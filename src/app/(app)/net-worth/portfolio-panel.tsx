@@ -20,6 +20,7 @@ import type { ValuedAccount, ValuedLiability } from "@/lib/networth/value";
 import { ValueBadge } from "./value-badge";
 import { AssetForm, type AssetValues, type Member } from "./asset-form";
 import { LiabilityForm, type LiabilityValues } from "./liability-form";
+import { PrimeRateControl } from "./prime-rate-control";
 import { Plus, Pencil, TrendingUp, TrendingDown, AlertTriangle } from "lucide-react";
 
 export type OwnerOption = { id: string; label: string };
@@ -48,6 +49,11 @@ export type LiabilitySeed = {
   linkage: string;
   balance_override: number | null;
   balance_override_as_of: string | null;
+  loan_type: string;
+  grace_months: number;
+  capitalize_interest: boolean;
+  rate_type: string;
+  prime_margin: number;
 };
 
 export function PortfolioPanel({
@@ -57,6 +63,7 @@ export function PortfolioPanel({
   liabilities,
   accountSeeds,
   liabilitySeeds,
+  primeRate,
 }: {
   householdId: string;
   members: Member[];
@@ -64,6 +71,7 @@ export function PortfolioPanel({
   liabilities: ValuedLiability[];
   accountSeeds: AccountSeed[];
   liabilitySeeds: LiabilitySeed[];
+  primeRate: number;
 }) {
   const router = useRouter();
   const supabase = createClient();
@@ -130,7 +138,12 @@ export function PortfolioPanel({
         const { error } = await supabase.from("holdings").insert(
           v.holdings.map((h) => ({
             account_id: accountId!,
-            symbol: h.symbol.trim().toUpperCase(),
+            // Equity tickers are upper-case; CoinGecko ids are lower-case
+            // slugs ("ripple", "bitcoin"). Upper-casing those breaks pricing.
+            symbol:
+              h.market === "crypto"
+                ? h.symbol.trim().toLowerCase()
+                : h.symbol.trim().toUpperCase(),
             quantity: Number(h.quantity) || 0,
             market: h.market,
           })),
@@ -203,6 +216,11 @@ export function PortfolioPanel({
         balance_override_as_of: Number.isFinite(override)
           ? v.balanceOverrideAsOf
           : null,
+        loan_type: v.loanType,
+        grace_months: v.loanType === "grace" ? parseInt(v.graceMonths, 10) || 0 : 0,
+        capitalize_interest: v.capitalizeInterest,
+        rate_type: v.rateType,
+        prime_margin: v.rateType === "prime" ? parseFloat(v.primeMargin) || 0 : 0,
       };
 
       const { error } = editingLiab
@@ -278,6 +296,11 @@ export function PortfolioPanel({
           linkage: (seed?.linkage as "none" | "cpi") ?? "none",
           balanceOverride: seed?.balance_override ? String(seed.balance_override) : "",
           balanceOverrideAsOf: seed?.balance_override_as_of ?? undefined,
+          loanType: (seed?.loan_type as LiabilityValues["loanType"]) ?? "spitzer",
+          graceMonths: seed?.grace_months ? String(seed.grace_months) : "",
+          capitalizeInterest: seed?.capitalize_interest ?? false,
+          rateType: (seed?.rate_type as "fixed" | "prime") ?? "fixed",
+          primeMargin: seed?.prime_margin ? String(seed.prime_margin) : "",
         };
       })()
     : undefined;
@@ -382,14 +405,15 @@ export function PortfolioPanel({
               <Row
                 key={l.id}
                 title={l.name}
-                subtitle={`${LIABILITY_KIND_LABELS[l.kind]}${
-                  l.monthsRemaining > 0
-                    ? ` · נותרו ${Math.floor(l.monthsRemaining / 12)} שנים`
-                    : ""
-                }`}
+                subtitle={liabilitySubtitle(l)}
                 value={l.balance}
                 negative
                 badge={<ValueBadge basis={l.basis} asOf={l.asOf} />}
+                warning={
+                  l.balloonDue !== null
+                    ? `תשלום בלון בסוף: ${formatILS(l.balloonDue)}`
+                    : null
+                }
                 onEdit={() => {
                   setEditingLiab(l);
                   setLiabOpen(true);
@@ -397,6 +421,7 @@ export function PortfolioPanel({
               />
             ))
           )}
+          <PrimeRateControl householdId={householdId} primeRate={primeRate} />
         </CardContent>
       </Card>
 
@@ -436,11 +461,33 @@ export function PortfolioPanel({
             onSubmit={saveLiability}
             onDelete={editingLiab ? deleteLiability : undefined}
             submitting={saving}
+            primeRate={primeRate}
           />
         </DialogContent>
       </Dialog>
     </>
   );
+}
+
+/** One line describing the loan's shape, rate and remaining term. */
+function liabilitySubtitle(l: ValuedLiability): string {
+  const parts: string[] = [LIABILITY_KIND_LABELS[l.kind]];
+
+  if (l.loanType === "none") {
+    parts.push("ללא החזר חודשי");
+    return parts.join(" · ");
+  }
+  if (l.loanType === "balloon") parts.push("בלון");
+  else if (l.inGrace) parts.push("בגרייס");
+
+  if (l.rate > 0) parts.push(`${l.rate.toFixed(2)}%`);
+  if (l.monthlyPayment > 0) parts.push(`${formatILS(l.monthlyPayment)} לחודש`);
+
+  if (l.monthsRemaining > 0) {
+    const years = Math.floor(l.monthsRemaining / 12);
+    parts.push(years > 0 ? `נותרו ${years} שנים` : `נותרו ${l.monthsRemaining} חודשים`);
+  }
+  return parts.join(" · ");
 }
 
 function Row({

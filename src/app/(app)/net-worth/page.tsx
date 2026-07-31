@@ -68,7 +68,7 @@ export default async function NetWorthPage() {
   ] = await Promise.all([
     supabase
       .from("households")
-      .select("name, month_start_day")
+      .select("name, month_start_day, prime_rate")
       .eq("id", householdId)
       .single(),
     supabase.from("profiles").select("id, display_name").eq("household_id", householdId),
@@ -191,8 +191,9 @@ export default async function NetWorthPage() {
     });
   });
 
+  const primeRate = Number(household?.prime_rate ?? 0);
   const valuedLiabilities = liabilities.map((l) =>
-    valueLiability(l, today, fx, cpiRatioAt(today, l.start_date)),
+    valueLiability(l, today, fx, cpiRatioAt(today, l.start_date), primeRate),
   );
 
   const summary = summarizeNetWorth(valuedAccounts, valuedLiabilities);
@@ -485,7 +486,13 @@ export default async function NetWorthPage() {
           balance_override:
             l.balance_override === null ? null : Number(l.balance_override),
           balance_override_as_of: l.balance_override_as_of,
+          loan_type: l.loan_type ?? "spitzer",
+          grace_months: Number(l.grace_months ?? 0),
+          capitalize_interest: l.capitalize_interest ?? false,
+          rate_type: l.rate_type ?? "fixed",
+          prime_margin: Number(l.prime_margin ?? 0),
         }))}
+        primeRate={primeRate}
       />
     </div>
   );

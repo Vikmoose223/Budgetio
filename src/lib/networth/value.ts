@@ -6,7 +6,7 @@
 
 import { toILS, type FxTable } from "./currency";
 import { driftFromAnchor, type Flow, type MonthlyYield } from "./drift";
-import { loanState } from "./amortization";
+import { loanState, effectiveRate, type LoanType } from "./amortization";
 import { accountReturn } from "./xirr";
 
 export type AssetKind =
@@ -240,6 +240,11 @@ export type LiabilityRow = {
   linkage: "none" | "cpi";
   balance_override: number | null;
   balance_override_as_of: string | null;
+  loan_type?: LoanType;
+  grace_months?: number;
+  capitalize_interest?: boolean;
+  rate_type?: "fixed" | "prime";
+  prime_margin?: number;
 };
 
 export type ValuedLiability = {
@@ -254,26 +259,45 @@ export type ValuedLiability = {
   monthlyPayment: number;
   monthsRemaining: number;
   interestPaid: number;
+  loanType: LoanType;
+  inGrace: boolean;
+  /** Lump sum due at maturity, for balloon loans. */
+  balloonDue: number | null;
+  /** The rate actually in force, after resolving prime + margin. */
+  rate: number;
 };
 
 /**
  * Outstanding balance for a liability. A manually entered balance always wins
  * over the computed schedule — the bank's number is the real one.
+ *
+ * `primeRate` resolves prime-linked loans; it's ignored for fixed ones.
  */
 export function valueLiability(
   row: LiabilityRow,
   asOf: string,
   fx: FxTable,
   cpiRatio = 1,
+  primeRate = 0,
 ): ValuedLiability {
+  const rate = effectiveRate(
+    row.rate_type ?? "fixed",
+    Number(row.annual_rate),
+    primeRate,
+    Number(row.prime_margin ?? 0),
+  );
+
   const state = loanState(
     {
       principal: Number(row.principal),
-      annualRate: Number(row.annual_rate),
+      annualRate: rate,
       termMonths: Number(row.term_months),
       startDate: row.start_date,
       paymentAmount: row.payment_amount,
       linkage: row.linkage,
+      loanType: row.loan_type ?? "spitzer",
+      graceMonths: Number(row.grace_months ?? 0),
+      capitalizeInterest: row.capitalize_interest ?? false,
     },
     asOf,
     cpiRatio,
@@ -297,6 +321,13 @@ export function valueLiability(
     monthlyPayment: round2(payment),
     monthsRemaining: state.monthsRemaining,
     interestPaid: round2(interest),
+    loanType: row.loan_type ?? "spitzer",
+    inGrace: state.inGrace,
+    balloonDue:
+      state.balloonDue === null
+        ? null
+        : round2(toILS(state.balloonDue, row.currency, fx) ?? state.balloonDue),
+    rate,
   };
 }
 

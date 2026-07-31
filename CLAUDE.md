@@ -70,11 +70,23 @@ Balance sheet half of the app: assets vs liabilities, per-partner, with auto-fet
 - `/recurring` shows both: manually flagged (grouped by category, month-scoped, with a `MonthNav`) and auto-detected (all history).
 - Dashboard shows the income-vs-expenses card **only when income exists**, so an untracked household doesn't get a permanent ₪0 tile.
 
+## Loan shapes & prime (migration `0006`)
+- `liabilities.loan_type`: **`spitzer`** (level payment) · **`grace`** (deferred principal for `grace_months`, then Spitzer over the remainder) · **`balloon`** (no principal repayment; everything due at maturity) · **`none`** (a debt with no schedule at all — money owed to family; the balance never moves on its own).
+- `capitalize_interest` distinguishes מלא from חלקי: `true` = interest accrues into the principal and nothing is paid; `false` = interest is paid monthly and the principal is untouched. Applies to both grace and balloon.
+- `rate_type` `fixed | prime` + `prime_margin` (**may be negative** — פריים מינוס). Resolved by `effectiveRate()`, which floors at 0.
+- **`households.prime_rate` is edited by hand, not fetched** (`PrimeRateControl` on the net-worth page). BOI moves it ~8×/year on announced dates; a stale scrape would misprice every linked loan while still looking live. Default 5.0 = BOI 3.5% + 1.5%, correct as of 2026-07-31.
+- `loanState()` simulates month by month, so grace/balloon/custom-payment/CPI all fall out of one loop.
+
+## Ticker lookup (`/api/net-worth/lookup`)
+🚨 **CoinGecko keys on its own id, not the ticker.** "XRP" is `ripple`, so a raw ticker never prices. The symbol box therefore **searches** (`/api/v3/search`) and stores the resolved id; results are ranked by `market_cap_rank` so real XRP beats "XRP ARMY". Equities are verified by quoting them, with `.TA` appended automatically for TASE.
+- Saving lower-cases crypto symbols and upper-cases equity tickers — upper-casing a CoinGecko id breaks it.
+- The holdings input is a full-width row of its own (`holding-row.tsx`); it was previously squeezed beside the quantity and market selects and was unusable on a phone.
+
 ## Status
 Roadmap stages 0–6 done + settings, recurring, PWA, deploy, **net worth tab**, **income + fixed-expense flag**. 187 unit tests, E2E smoke green. Deployed at Vercel (repo `github.com/Vikmoose223/Budgetio`). Full plan: `~/.claude/plans/mighty-leaping-moth.md` (local).
 
-## 🚨 Migrations pending
-`0004_net_worth.sql` and `0005_income_and_fixed.sql` have **not been applied yet**. Run both in the Supabase SQL Editor before pushing — `main` auto-deploys.
+## 🚨 Migrations
+`0004` and `0005` are **applied** (verified live 2026-07-31). `0006_loan_types_and_prime.sql` is **pending** — run it in the Supabase SQL Editor before pushing; `main` auto-deploys and the code selects `prime_rate` / `loan_type`.
 
 ## Possible later work (discussed, not built)
 Face-ID app-lock (WebAuthn / Capacitor biometric), Web Push budget-exceeded alerts (iOS 16.4+ installed PWA — the refresh route is now the precedent for server-side work), auto bank-sync via `israeli-bank-scrapers` (run **locally** — storing bank credentials is the main risk; never in the cloud/chat), CSV export, yearly overview.

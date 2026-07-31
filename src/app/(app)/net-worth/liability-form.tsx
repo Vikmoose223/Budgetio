@@ -7,6 +7,8 @@ import { Label } from "@/components/ui/label";
 import { todayISO } from "@/lib/format";
 import { LIABILITY_KIND_LABELS } from "@/lib/networth/summary";
 import type { LiabilityKind } from "@/lib/networth/value";
+import { effectiveRate, levelPayment, type LoanType } from "@/lib/networth/amortization";
+import { formatILS } from "@/lib/format";
 import type { Member } from "./asset-form";
 import { Loader2, Trash2 } from "lucide-react";
 
@@ -25,6 +27,25 @@ export type LiabilityValues = {
   linkage: "none" | "cpi";
   balanceOverride: string;
   balanceOverrideAsOf: string;
+  loanType: LoanType;
+  graceMonths: string;
+  capitalizeInterest: boolean;
+  rateType: "fixed" | "prime";
+  primeMargin: string;
+};
+
+const LOAN_TYPE_LABELS: Record<LoanType, string> = {
+  spitzer: "שפיצר — החזר חודשי קבוע",
+  grace: "גרייס — דחיית קרן ואז שפיצר",
+  balloon: "בלון — הכל בסוף התקופה",
+  none: "ללא החזר חודשי (חוב פתוח)",
+};
+
+const LOAN_TYPE_HINTS: Record<LoanType, string> = {
+  spitzer: "התשלום החודשי קבוע לאורך כל התקופה.",
+  grace: "בתקופת הגרייס לא מחזירים קרן. אחריה ההחזר גבוה יותר, כי אותה קרן נפרסת על פחות חודשים.",
+  balloon: "לא מחזירים קרן כלל — כל הסכום נפרע בתאריך הסיום.",
+  none: "חוב שפשוט קיים, בלי לוח סילוקין — למשל חוב להורים. היתרה לא משתנה מעצמה.",
 };
 
 export function LiabilityForm({
@@ -33,12 +54,15 @@ export function LiabilityForm({
   onSubmit,
   onDelete,
   submitting,
+  primeRate,
 }: {
   members: Member[];
   initial?: Partial<LiabilityValues>;
   onSubmit: (v: LiabilityValues) => void;
   onDelete?: () => void;
   submitting: boolean;
+  /** Household prime rate, for previewing a prime-linked loan's real rate. */
+  primeRate: number;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [kind, setKind] = useState<LiabilityKind>(initial?.kind ?? "mortgage");
@@ -53,10 +77,51 @@ export function LiabilityForm({
   const [balanceOverrideAsOf, setBalanceOverrideAsOf] = useState(
     initial?.balanceOverrideAsOf ?? todayISO(),
   );
+  const [loanType, setLoanType] = useState<LoanType>(initial?.loanType ?? "spitzer");
+  const [graceMonths, setGraceMonths] = useState(initial?.graceMonths ?? "");
+  const [capitalizeInterest, setCapitalizeInterest] = useState(
+    initial?.capitalizeInterest ?? false,
+  );
+  const [rateType, setRateType] = useState<"fixed" | "prime">(
+    initial?.rateType ?? "fixed",
+  );
+  const [primeMargin, setPrimeMargin] = useState(initial?.primeMargin ?? "");
   const [err, setErr] = useState<string | null>(null);
 
   const numeric = (v: string) =>
     v.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1");
+  // Prime margins are routinely negative (פריים מינוס 0.5).
+  const signedNumeric = (v: string) =>
+    v.replace(/[^\d.-]/g, "").replace(/(?!^)-/g, "").replace(/(\..*)\./g, "$1");
+
+  const hasSchedule = loanType !== "none";
+  const usesGrace = loanType === "grace";
+  const deferred = loanType === "grace" || loanType === "balloon";
+
+  // Live preview of the rate actually in force and what it costs per month.
+  const resolvedRate = effectiveRate(
+    rateType,
+    parseFloat(annualRate) || 0,
+    primeRate,
+    parseFloat(primeMargin) || 0,
+  );
+  const previewPrincipal = parseFloat(principal) || 0;
+  const previewTerm = parseInt(termMonths, 10) || 0;
+  const previewGrace = usesGrace ? Math.min(parseInt(graceMonths, 10) || 0, previewTerm) : 0;
+  const previewPayment =
+    hasSchedule && previewPrincipal > 0 && previewTerm > 0
+      ? loanType === "balloon"
+        ? capitalizeInterest
+          ? 0
+          : (previewPrincipal * resolvedRate) / 100 / 12
+        : levelPayment(
+            capitalizeInterest
+              ? previewPrincipal * Math.pow(1 + resolvedRate / 100 / 12, previewGrace)
+              : previewPrincipal,
+            resolvedRate,
+            previewTerm - previewGrace,
+          )
+      : 0;
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -66,6 +131,10 @@ export function LiabilityForm({
     }
     if (!parseFloat(principal) && !parseFloat(balanceOverride)) {
       setErr("הזינו סכום מקורי או יתרה נוכחית.");
+      return;
+    }
+    if (usesGrace && previewGrace >= previewTerm && previewTerm > 0) {
+      setErr("תקופת הגרייס חייבת להיות קצרה מתקופת ההלוואה. לגרייס מלא בחרו בלון.");
       return;
     }
     setErr(null);
@@ -81,6 +150,11 @@ export function LiabilityForm({
       linkage,
       balanceOverride,
       balanceOverrideAsOf,
+      loanType,
+      graceMonths,
+      capitalizeInterest,
+      rateType,
+      primeMargin,
     });
   }
 
@@ -131,42 +205,37 @@ export function LiabilityForm({
         </div>
       </div>
 
+      {/* Loan structure drives which of the fields below even apply. */}
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="liab-loan-type">סוג ההלוואה</Label>
+        <select
+          id="liab-loan-type"
+          value={loanType}
+          onChange={(e) => setLoanType(e.target.value as LoanType)}
+          className={SELECT_CLASS}
+        >
+          {Object.entries(LOAN_TYPE_LABELS).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <p className="-mt-1 text-xs text-muted-foreground">
+          {LOAN_TYPE_HINTS[loanType]}
+        </p>
+      </div>
+
       <div className="grid grid-cols-2 gap-3">
         <div className="flex flex-col gap-2">
-          <Label htmlFor="liab-principal">סכום מקורי</Label>
+          <Label htmlFor="liab-principal">
+            {hasSchedule ? "סכום מקורי" : "סכום החוב"}
+          </Label>
           <Input
             id="liab-principal"
             value={principal}
             onChange={(e) => setPrincipal(numeric(e.target.value))}
             placeholder="0"
             inputMode="decimal"
-            dir="ltr"
-            className="text-left"
-          />
-        </div>
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="liab-rate">ריבית שנתית (%)</Label>
-          <Input
-            id="liab-rate"
-            value={annualRate}
-            onChange={(e) => setAnnualRate(numeric(e.target.value))}
-            placeholder="4.5"
-            inputMode="decimal"
-            dir="ltr"
-            className="text-left"
-          />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="liab-term">תקופה (חודשים)</Label>
-          <Input
-            id="liab-term"
-            value={termMonths}
-            onChange={(e) => setTermMonths(e.target.value.replace(/\D/g, ""))}
-            placeholder="360"
-            inputMode="numeric"
             dir="ltr"
             className="text-left"
           />
@@ -183,32 +252,156 @@ export function LiabilityForm({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="liab-payment">החזר חודשי (לא חובה)</Label>
-          <Input
-            id="liab-payment"
-            value={paymentAmount}
-            onChange={(e) => setPaymentAmount(numeric(e.target.value))}
-            placeholder="מחושב אוטומטית"
-            inputMode="decimal"
-            dir="ltr"
-            className="text-left"
-          />
-        </div>
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="liab-linkage">הצמדה</Label>
-          <select
-            id="liab-linkage"
-            value={linkage}
-            onChange={(e) => setLinkage(e.target.value as "none" | "cpi")}
-            className={SELECT_CLASS}
-          >
-            <option value="none">לא צמוד</option>
-            <option value="cpi">צמוד מדד</option>
-          </select>
-        </div>
-      </div>
+      {hasSchedule && (
+        <>
+          {/* --- Interest ------------------------------------------------- */}
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="liab-rate-type">סוג ריבית</Label>
+            <select
+              id="liab-rate-type"
+              value={rateType}
+              onChange={(e) => setRateType(e.target.value as "fixed" | "prime")}
+              className={SELECT_CLASS}
+            >
+              <option value="fixed">ריבית קבועה</option>
+              <option value="prime">פריים ± מרווח</option>
+            </select>
+          </div>
+
+          {rateType === "fixed" ? (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="liab-rate">ריבית שנתית (%)</Label>
+              <Input
+                id="liab-rate"
+                value={annualRate}
+                onChange={(e) => setAnnualRate(numeric(e.target.value))}
+                placeholder="4.5"
+                inputMode="decimal"
+                dir="ltr"
+                className="text-left"
+              />
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="liab-margin">מרווח מעל/מתחת לפריים</Label>
+              <Input
+                id="liab-margin"
+                value={primeMargin}
+                onChange={(e) => setPrimeMargin(signedNumeric(e.target.value))}
+                placeholder="0.5 או 0.5-"
+                inputMode="text"
+                dir="ltr"
+                className="text-left"
+              />
+              <p className="-mt-1 text-xs text-muted-foreground">
+                פריים כרגע {primeRate}% ← הריבית בפועל{" "}
+                <strong>{resolvedRate.toFixed(2)}%</strong>. למשל פריים מינוס 0.5
+                מזינים כ־<span dir="ltr">-0.5</span>.
+              </p>
+            </div>
+          )}
+
+          {/* --- Term and grace ------------------------------------------- */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="liab-term">תקופה (חודשים)</Label>
+              <Input
+                id="liab-term"
+                value={termMonths}
+                onChange={(e) => setTermMonths(e.target.value.replace(/\D/g, ""))}
+                placeholder="360"
+                inputMode="numeric"
+                dir="ltr"
+                className="text-left"
+              />
+            </div>
+            {usesGrace && (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="liab-grace">חודשי גרייס</Label>
+                <Input
+                  id="liab-grace"
+                  value={graceMonths}
+                  onChange={(e) => setGraceMonths(e.target.value.replace(/\D/g, ""))}
+                  placeholder="12"
+                  inputMode="numeric"
+                  dir="ltr"
+                  className="text-left"
+                />
+              </div>
+            )}
+          </div>
+
+          {deferred && (
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={capitalizeInterest}
+                onChange={(e) => setCapitalizeInterest(e.target.checked)}
+                className="mt-0.5 size-4 rounded border-input accent-primary"
+              />
+              <span>
+                {loanType === "balloon" ? "בלון מלא" : "גרייס מלא"} — גם הריבית נצברת
+                ולא משלמים כלום
+                <span className="block text-xs text-muted-foreground">
+                  אם לא מסומן: משלמים ריבית בלבד מדי חודש, והקרן לא זזה.
+                </span>
+              </span>
+            </label>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="liab-payment">החזר חודשי (לא חובה)</Label>
+              <Input
+                id="liab-payment"
+                value={paymentAmount}
+                onChange={(e) => setPaymentAmount(numeric(e.target.value))}
+                placeholder="מחושב אוטומטית"
+                inputMode="decimal"
+                dir="ltr"
+                className="text-left"
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="liab-linkage">הצמדה</Label>
+              <select
+                id="liab-linkage"
+                value={linkage}
+                onChange={(e) => setLinkage(e.target.value as "none" | "cpi")}
+                className={SELECT_CLASS}
+              >
+                <option value="none">לא צמוד</option>
+                <option value="cpi">צמוד מדד</option>
+              </select>
+            </div>
+          </div>
+
+          {/* What the chosen structure actually costs, before saving. */}
+          {previewPrincipal > 0 && previewTerm > 0 && (
+            <div className="rounded-lg bg-muted/50 p-2.5 text-xs text-muted-foreground">
+              {loanType === "balloon" ? (
+                capitalizeInterest ? (
+                  <>אין תשלום חודשי. בסוף התקופה נפרע הכל בבת אחת.</>
+                ) : (
+                  <>
+                    ריבית חודשית {formatILS(previewPayment)}, והקרן{" "}
+                    {formatILS(previewPrincipal)} נפרעת בסוף.
+                  </>
+                )
+              ) : usesGrace && previewGrace > 0 ? (
+                <>
+                  {previewGrace} חודשי גרייס, ואחריהם החזר של{" "}
+                  <strong>{formatILS(previewPayment)}</strong> לחודש.
+                </>
+              ) : (
+                <>
+                  החזר חודשי מוערך: <strong>{formatILS(previewPayment)}</strong>
+                </>
+              )}
+            </div>
+          )}
+        </>
+      )}
 
       <div className="grid grid-cols-2 gap-3 rounded-lg border border-border p-3">
         <div className="col-span-2">

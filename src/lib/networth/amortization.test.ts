@@ -1,5 +1,10 @@
 import { expect, test, describe } from "vitest";
-import { levelPayment, loanState, monthsBetween } from "./amortization";
+import {
+  levelPayment,
+  loanState,
+  monthsBetween,
+  effectiveRate,
+} from "./amortization";
 
 describe("monthsBetween", () => {
   test("counts whole months only", () => {
@@ -91,5 +96,152 @@ describe("loanState", () => {
     const state = loanState({ ...mortgage, linkage: "none" }, "2026-01-01", 1.15);
     const plain = loanState(mortgage, "2026-01-01");
     expect(state.balance).toBeCloseTo(plain.balance, 6);
+  });
+});
+
+describe("effectiveRate", () => {
+  test("a fixed loan uses its own rate", () => {
+    expect(effectiveRate("fixed", 4.5, 5, 1)).toBe(4.5);
+  });
+
+  test("prime plus a margin", () => {
+    expect(effectiveRate("prime", 0, 5, 1.2)).toBeCloseTo(6.2, 6);
+  });
+
+  test("prime minus a margin (פריים מינוס)", () => {
+    expect(effectiveRate("prime", 0, 5, -0.5)).toBeCloseTo(4.5, 6);
+  });
+
+  test("a negative margin can't drive the rate below zero", () => {
+    expect(effectiveRate("prime", 0, 1, -5)).toBe(0);
+  });
+});
+
+describe("loanState — loan types", () => {
+  const base = {
+    principal: 100_000,
+    annualRate: 6,
+    termMonths: 60,
+    startDate: "2026-01-01",
+  };
+
+  describe("none — a debt with no repayment schedule", () => {
+    const debt = { ...base, loanType: "none" as const, annualRate: 0 };
+
+    test("the balance never moves on its own", () => {
+      expect(loanState(debt, "2026-01-01").balance).toBe(100_000);
+      expect(loanState(debt, "2030-01-01").balance).toBe(100_000);
+    });
+
+    test("there is no monthly payment and nothing accrues", () => {
+      const s = loanState(debt, "2027-06-01");
+      expect(s.payment).toBe(0);
+      expect(s.interestPaid).toBe(0);
+      expect(s.principalPaid).toBe(0);
+      expect(s.balloonDue).toBeNull();
+    });
+
+    test("a stated interest rate is still ignored — there's no schedule", () => {
+      const withRate = loanState({ ...debt, annualRate: 10 }, "2030-01-01");
+      expect(withRate.balance).toBe(100_000);
+    });
+  });
+
+  describe("balloon — everything due at the end", () => {
+    test("partial balloon: interest paid monthly, principal untouched", () => {
+      const s = loanState(
+        { ...base, loanType: "balloon", capitalizeInterest: false },
+        "2027-01-01",
+      );
+      expect(s.balance).toBeCloseTo(100_000, 2);
+      // 6%/yr on 100k = ₪500/month.
+      expect(s.payment).toBeCloseTo(500, 2);
+      expect(s.interestPaid).toBeCloseTo(6000, 0);
+      expect(s.principalPaid).toBe(0);
+      expect(s.balloonDue).toBeCloseTo(100_000, 2);
+    });
+
+    test("full balloon: interest capitalizes, nothing is paid", () => {
+      const s = loanState(
+        { ...base, loanType: "balloon", capitalizeInterest: true },
+        "2027-01-01",
+      );
+      // 100,000 × (1 + 0.06/12)^12
+      expect(s.balance).toBeCloseTo(106_167.78, 0);
+      expect(s.payment).toBe(0);
+      expect(s.interestPaid).toBe(0);
+      // The lump due at maturity covers the full compounded term.
+      expect(s.balloonDue).toBeCloseTo(100_000 * Math.pow(1.005, 60), 0);
+    });
+
+    test("a balloon stays in grace for its whole term", () => {
+      expect(loanState({ ...base, loanType: "balloon" }, "2029-01-01").inGrace).toBe(
+        true,
+      );
+    });
+  });
+
+  describe("grace — deferred principal, then שפיצר", () => {
+    const grace = {
+      ...base,
+      loanType: "grace" as const,
+      graceMonths: 12,
+    };
+
+    test("during partial grace only interest is paid", () => {
+      const s = loanState({ ...grace, capitalizeInterest: false }, "2026-07-01");
+      expect(s.balance).toBeCloseTo(100_000, 2);
+      expect(s.principalPaid).toBe(0);
+      expect(s.inGrace).toBe(true);
+      expect(s.payment).toBeCloseTo(500, 2);
+    });
+
+    test("during full grace the balance grows", () => {
+      const s = loanState({ ...grace, capitalizeInterest: true }, "2026-07-01");
+      expect(s.balance).toBeGreaterThan(100_000);
+      expect(s.payment).toBe(0);
+    });
+
+    test("principal starts falling once grace ends", () => {
+      const atGraceEnd = loanState(grace, "2027-01-01");
+      const later = loanState(grace, "2028-01-01");
+      expect(atGraceEnd.principalPaid).toBe(0);
+      expect(later.principalPaid).toBeGreaterThan(0);
+      expect(later.balance).toBeLessThan(atGraceEnd.balance);
+      expect(later.inGrace).toBe(false);
+    });
+
+    test("it still clears by the end of the full term", () => {
+      const s = loanState(grace, "2031-01-01");
+      expect(s.balance).toBeCloseTo(0, 1);
+    });
+
+    test("the post-grace payment is higher than plain שפיצר would be", () => {
+      // The same principal repaid over 48 months instead of 60.
+      const gracePayment = loanState(grace, "2027-06-01").payment;
+      const spitzerPayment = loanState(
+        { ...base, loanType: "spitzer" },
+        "2027-06-01",
+      ).payment;
+      expect(gracePayment).toBeGreaterThan(spitzerPayment);
+    });
+
+    test("zero grace months behaves exactly like שפיצר", () => {
+      const a = loanState({ ...grace, graceMonths: 0 }, "2028-01-01");
+      const b = loanState({ ...base, loanType: "spitzer" }, "2028-01-01");
+      expect(a.balance).toBeCloseTo(b.balance, 2);
+    });
+
+    test("grace longer than the term is clamped, not allowed to invert it", () => {
+      const s = loanState({ ...grace, graceMonths: 999 }, "2028-01-01");
+      expect(Number.isFinite(s.balance)).toBe(true);
+      expect(s.balance).toBeGreaterThan(0);
+    });
+  });
+
+  test("spitzer stays the default when no type is given", () => {
+    const explicit = loanState({ ...base, loanType: "spitzer" }, "2027-01-01");
+    const implicit = loanState(base, "2027-01-01");
+    expect(implicit.balance).toBeCloseTo(explicit.balance, 6);
   });
 });
