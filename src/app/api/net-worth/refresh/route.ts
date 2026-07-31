@@ -69,18 +69,26 @@ export async function POST() {
   const equities = holdings.filter((h) => h.market !== "crypto");
   const coins = holdings.filter((h) => h.market === "crypto");
 
+  // Deduplicate: two accounts may hold the same ticker.
+  const uniqueEquities = [
+    ...new Map(equities.map((h) => [`${h.market}:${h.symbol}`, h])).values(),
+  ];
   const quotes = await Promise.all(
-    // Deduplicate: two accounts may hold the same ticker.
-    [...new Map(equities.map((h) => [`${h.market}:${h.symbol}`, h])).values()].map(
-      (h) => fetchQuote(h.symbol, h.market as "us" | "tase", asOf),
-    ),
-  );
-  const coinRows = await fetchCoinPrices(
-    [...new Set(coins.map((c) => c.symbol.toLowerCase()))],
-    asOf,
+    uniqueEquities.map((h) => fetchQuote(h.symbol, h.market as "us" | "tase", asOf)),
   );
 
+  const coinIds = [...new Set(coins.map((c) => c.symbol.toLowerCase()))];
+  const coinRows = await fetchCoinPrices(coinIds, asOf);
+
   const priceRows = [...quotes.filter((q) => q !== null), ...coinRows];
+
+  // Report what we couldn't price so the UI can say so out loud. A symbol that
+  // silently never gets a price is indistinguishable from a broken feature.
+  const pricedCoins = new Set(coinRows.map((r) => r.symbol.toLowerCase()));
+  const failed = [
+    ...uniqueEquities.filter((_, i) => quotes[i] === null).map((h) => h.symbol),
+    ...coinIds.filter((id) => !pricedCoins.has(id)),
+  ];
   if (priceRows.length > 0) {
     // Store under the symbol we asked for, not the one the API echoed back.
     const { error } = await supabase.from("price_cache").upsert(
@@ -217,5 +225,5 @@ export async function POST() {
     if (!error) result.yields += rows.length;
   }
 
-  return NextResponse.json({ ok: true, asOf, ...result });
+  return NextResponse.json({ ok: true, asOf, ...result, failed });
 }

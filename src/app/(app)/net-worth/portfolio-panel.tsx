@@ -166,9 +166,30 @@ export function PortfolioPanel({
         if (error) throw error;
       }
 
-      toast.success(editingAsset ? "החשבון עודכן" : "החשבון נוסף");
       setAssetOpen(false);
       setEditingAsset(null);
+
+      // Price the new symbols now rather than leaving it to the page-level
+      // refresher, which only fires on its own schedule. Without this a
+      // freshly-added holding shows no value until something else happens to
+      // trigger a fetch, which reads as "it didn't work".
+      if (v.holdings.length > 0) {
+        toast.success(editingAsset ? "החשבון עודכן" : "החשבון נוסף");
+        try {
+          const res = await fetch("/api/net-worth/refresh", { method: "POST" });
+          const data = await res.json().catch(() => null);
+          if (data?.failed?.length) {
+            toast.error(`לא נמשך מחיר עבור ${data.failed.join(", ")}`);
+          } else if (data?.prices > 0) {
+            toast.success("המחירים עודכנו");
+          }
+        } catch {
+          toast.error("משיכת המחירים נכשלה — נסו את כפתור הרענון");
+        }
+      } else {
+        toast.success(editingAsset ? "החשבון עודכן" : "החשבון נוסף");
+      }
+
       router.refresh();
     } catch {
       toast.error("שמירה נכשלה");

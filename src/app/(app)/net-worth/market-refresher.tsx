@@ -18,15 +18,18 @@ export function MarketRefresher({
   fetchedAt,
   staleAfterHours,
   lastUpdated,
+  hasUnpriced = false,
 }: {
   /** ISO timestamp of the newest cached price, or null if never fetched. */
   fetchedAt: string | null;
   staleAfterHours: number;
   lastUpdated: string | null;
+  /** True when something is held but has no price — always worth a fetch. */
+  hasUnpriced?: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const fired = useRef(false);
+  const firedFor = useRef<string | null>(null);
 
   /** The network call on its own — no state, so it's safe to run from an effect. */
   const doRefresh = useCallback(async () => {
@@ -39,17 +42,28 @@ export function MarketRefresher({
   }, [router]);
 
   useEffect(() => {
-    // Staleness is decided here rather than during render: reading the clock
-    // is impure, so it can't happen on the server or in a render pass.
-    if (fired.current) return;
+    // A symbol we hold but have no price for must be fetched regardless of how
+    // fresh the rest of the cache is. Without this, adding a new holding to an
+    // account that already had priced ones left it permanently unpriced: the
+    // cache looked current, so nothing ever went and asked for the new symbol.
     const stale =
       fetchedAt === null ||
+      // Staleness is decided here rather than during render: reading the clock
+      // is impure, so it can't happen on the server or in a render pass.
       Date.now() - new Date(fetchedAt).getTime() > staleAfterHours * 3_600_000;
-    if (!stale) return;
-    fired.current = true;
+
+    if (!stale && !hasUnpriced) return;
+
+    // Guard per *reason*, not per mount: router.refresh() reuses this same
+    // component instance, so a mount-scoped flag would block the retry that a
+    // freshly-added holding needs.
+    const reason = `${hasUnpriced ? "unpriced" : "stale"}:${fetchedAt ?? "none"}`;
+    if (firedFor.current === reason) return;
+    firedFor.current = reason;
+
     // Background refresh: intentionally silent, so no spinner state here.
     void doRefresh();
-  }, [fetchedAt, staleAfterHours, doRefresh]);
+  }, [fetchedAt, staleAfterHours, hasUnpriced, doRefresh]);
 
   async function manualRefresh() {
     setBusy(true);

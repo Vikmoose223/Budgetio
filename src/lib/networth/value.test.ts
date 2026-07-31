@@ -95,6 +95,37 @@ describe("valueAccount — holdings", () => {
     expect(result.value).toBeCloseTo(20938.44 + 10870, 0);
   });
 
+  test("a lower-case CoinGecko id matches its cached price", () => {
+    // Crypto is stored as CoinGecko's id ("ripple"), not the ticker ("XRP").
+    // Both sides must key identically or the holding silently never prices —
+    // which looked exactly like the feature being broken.
+    const result = valueAccount({
+      ...EMPTY,
+      account: account({ kind: "crypto" }),
+      holdings: [{ symbol: "ripple", quantity: 1000, market: "crypto" }],
+      prices: priceIndex([
+        { symbol: "ripple", market: "crypto", price: 3.27, currency: "ILS", as_of: "2026-07-31" },
+      ]),
+    });
+    expect(result.value).toBeCloseTo(3270, 2);
+    expect(result.basis).toBe("holdings");
+    expect(result.unpricedSymbols).toEqual([]);
+  });
+
+  test("symbol casing doesn't break the match either way", () => {
+    const prices = priceIndex([
+      { symbol: "ripple", market: "crypto", price: 3.27, currency: "ILS", as_of: "2026-07-31" },
+    ]);
+    // A holding saved before ids were normalised must still resolve.
+    const result = valueAccount({
+      ...EMPTY,
+      account: account({ kind: "crypto" }),
+      holdings: [{ symbol: "RIPPLE", quantity: 100, market: "crypto" }],
+      prices,
+    });
+    expect(result.value).toBeCloseTo(327, 2);
+  });
+
   test("unpriced symbols are reported, not silently dropped", () => {
     const result = valueAccount({
       ...EMPTY,

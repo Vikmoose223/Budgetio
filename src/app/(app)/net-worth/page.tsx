@@ -257,6 +257,8 @@ export default async function NetWorthPage() {
   // Whether that timestamp counts as stale is decided on the client — reading
   // the clock during render is impure.
   const hasAutoPriced = (holdingRows ?? []).length > 0;
+  // Anything held but unpriced needs a fetch no matter how fresh the cache is.
+  const hasUnpriced = valuedAccounts.some((a) => a.unpricedSymbols.length > 0);
 
   const feeByAccountId = new Map<string, number>();
   for (const a of accounts) {
@@ -293,6 +295,7 @@ export default async function NetWorthPage() {
           <MarketRefresher
             fetchedAt={newestFetch}
             staleAfterHours={STALE_AFTER_HOURS}
+            hasUnpriced={hasUnpriced}
             lastUpdated={
               newestFetch
                 ? new Intl.DateTimeFormat("he-IL", {
