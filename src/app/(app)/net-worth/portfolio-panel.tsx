@@ -411,10 +411,11 @@ export function PortfolioPanel({
                 warning={
                   a.unpricedSymbols.length > 0
                     ? `ללא מחיר: ${a.unpricedSymbols.join(", ")}`
-                    : // A fund is linked but no published returns came back, so
-                      // the value silently isn't drifting. Say so.
+                    : // A fund id is stored but no published returns came back.
+                      // Refreshing can't fix a wrong id, so point at the fix
+                      // that can: re-pick the fund from the search.
                       seedFor(a.id)?.fund_id && a.basis === "anchor"
-                      ? "הקופה מקושרת אך לא נמצאו תשואות — נסו רענון"
+                      ? "לא נמצאו תשואות למזהה השמור — פתחו עריכה ובחרו קופה מהחיפוש"
                       : null
                 }
                 onOpen={() => setDetailAsset(a)}

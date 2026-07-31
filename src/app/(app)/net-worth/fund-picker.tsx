@@ -27,19 +27,24 @@ export function FundPicker({
   fundId,
   fundName,
   fundSource,
+  defaultSource = "gemel",
   onChange,
 }: {
   fundId: string;
   fundName?: string;
   fundSource: "gemel" | "pension" | "";
+  /** Which dataset to search first, based on the account kind. */
+  defaultSource?: "gemel" | "pension";
   onChange: (v: {
     fundId: string;
     fundSource: "gemel" | "pension" | "";
     fundName?: string;
   }) => void;
 }) {
+  // A pension fund lives in פנסיה-נט, not גמל-נט. Defaulting to the wrong
+  // dataset means the search finds nothing and looks broken.
   const [source, setSource] = useState<"gemel" | "pension">(
-    fundSource === "pension" ? "pension" : "gemel",
+    fundSource === "pension" ? "pension" : fundSource === "gemel" ? "gemel" : defaultSource,
   );
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<FundOption[] | null>(null);
@@ -62,7 +67,11 @@ export function FundPicker({
       const data = await res.json();
       const funds: FundOption[] = data.funds ?? [];
       if (funds.length === 0) {
-        setError("לא נמצאו קופות בשם הזה. נסו חלק מהשם, למשל ״מיטב״ או ״הראל״.");
+        setError(
+          source === "gemel"
+            ? "לא נמצא בגמל-נט. אם זו קרן פנסיה — החליפו ל״פנסיה״ וחפשו שוב."
+            : "לא נמצא בפנסיה-נט. אם זו קופת גמל או השתלמות — החליפו ל״גמל״ וחפשו שוב.",
+        );
       } else {
         setResults(funds);
       }

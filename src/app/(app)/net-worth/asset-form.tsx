@@ -200,6 +200,7 @@ export function AssetForm({
           fundId={fundId}
           fundName={fundName}
           fundSource={fundSource}
+          defaultSource={kind === "pension" ? "pension" : "gemel"}
           onChange={(v) => {
             setFundId(v.fundId);
             setFundSource(v.fundSource);
