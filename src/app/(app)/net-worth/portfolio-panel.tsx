@@ -197,14 +197,17 @@ export function PortfolioPanel({
         try {
           const res = await fetch("/api/net-worth/refresh", { method: "POST" });
           const data = await res.json().catch(() => null);
-          if (data?.failed?.length) {
+          if (data?.fundErrors?.length) {
+            // Show the real reason rather than a generic failure — the cause
+            // is either the data source or the database, and they need
+            // completely different fixes.
+            toast.error(data.fundErrors.join(" · "), { duration: 12000 });
+          } else if (data?.failed?.length) {
             toast.error(`לא נמשך מחיר עבור ${data.failed.join(", ")}`);
           } else if (data?.yields > 0) {
-            toast.success("תשואות הקופה נמשכו");
+            toast.success(`נמשכו ${data.yields} חודשי תשואה`);
           } else if (data?.prices > 0) {
             toast.success("המחירים עודכנו");
-          } else if (v.fundId) {
-            toast.error("לא נמצאו תשואות לקופה שנבחרה");
           }
         } catch {
           toast.error("משיכת המחירים נכשלה — נסו את כפתור הרענון");

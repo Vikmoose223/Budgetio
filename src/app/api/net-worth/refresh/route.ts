@@ -216,14 +216,33 @@ export async function POST() {
     ...new Map(funds.map((f) => [`${f.fund_source}:${f.fund_id}`, f])).values(),
   ];
 
-  for (const fund of uniqueFunds) {
-    const rows = await fetchFundHistory(fund.fund_id, fund.fund_source, 36);
-    if (rows.length === 0) continue;
-    const { error } = await supabase
-      .from("fund_yields_cache")
-      .upsert(rows, { onConflict: "fund_id,source,report_period" });
-    if (!error) result.yields += rows.length;
-  }
+  // Both the fetch and the write used to fail silently here: an empty result
+  // was skipped with `continue`, and an upsert error was swallowed by
+  // `if (!error)`. Either way the caller saw "no yields" with no idea whether
+  // the data source or the database was at fault. Report both.
+  const fundResults = await Promise.all(
+    uniqueFunds.map(async (fund) => {
+      const label = `${fund.fund_source}:${fund.fund_id}`;
+      const rows = await fetchFundHistory(fund.fund_id, fund.fund_source, 36);
+      if (rows.length === 0) {
+        return { fund: label, rows: 0, error: "no rows returned from data.gov.il" };
+      }
+      const { error } = await supabase
+        .from("fund_yields_cache")
+        .upsert(rows, { onConflict: "fund_id,source,report_period" });
+      if (error) {
+        return { fund: label, rows: rows.length, error: `db: ${error.message}` };
+      }
+      return { fund: label, rows: rows.length, error: null };
+    }),
+  );
 
-  return NextResponse.json({ ok: true, asOf, ...result, failed });
+  for (const r of fundResults) {
+    if (!r.error) result.yields += r.rows;
+  }
+  const fundErrors = fundResults
+    .filter((r) => r.error)
+    .map((r) => `${r.fund} — ${r.error}`);
+
+  return NextResponse.json({ ok: true, asOf, ...result, failed, fundErrors });
 }

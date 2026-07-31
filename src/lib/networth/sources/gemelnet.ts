@@ -160,7 +160,14 @@ export async function searchFunds(
   }
 }
 
-/** Fetch one fund's recent monthly yields. Returns [] on any failure. */
+/**
+ * Fetch one fund's recent monthly yields. Returns [] on any failure.
+ *
+ * Deliberately uncached: this runs from an explicit "refresh" action, and
+ * caching it for hours means a single bad response — a transient upstream
+ * error, or a request made while the fund link was still wrong — keeps being
+ * replayed long after the underlying problem is fixed.
+ */
 export async function fetchFundHistory(
   fundId: number,
   source: FundSource,
@@ -168,7 +175,7 @@ export async function fetchFundHistory(
 ): Promise<FundYieldRow[]> {
   try {
     const res = await fetch(fundHistoryUrl(fundId, source, limit), {
-      next: { revalidate: 60 * 60 * 12 },
+      cache: "no-store",
     });
     if (!res.ok) return [];
     return parseFundYields(await res.json(), source);

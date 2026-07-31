@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 /**
@@ -32,14 +33,26 @@ export function MarketRefresher({
   const firedFor = useRef<string | null>(null);
 
   /** The network call on its own — no state, so it's safe to run from an effect. */
-  const doRefresh = useCallback(async () => {
-    try {
-      const res = await fetch("/api/net-worth/refresh", { method: "POST" });
-      if (res.ok) router.refresh();
-    } catch {
-      // Offline or the endpoint is down — cached values stay on screen.
-    }
-  }, [router]);
+  const doRefresh = useCallback(
+    async (announce = false) => {
+      try {
+        const res = await fetch("/api/net-worth/refresh", { method: "POST" });
+        if (!res.ok) return;
+        if (announce) {
+          const data = await res.json().catch(() => null);
+          if (data?.fundErrors?.length) {
+            toast.error(data.fundErrors.join(" · "), { duration: 12000 });
+          } else if (data?.yields > 0) {
+            toast.success(`נמשכו ${data.yields} חודשי תשואה`);
+          }
+        }
+        router.refresh();
+      } catch {
+        // Offline or the endpoint is down — cached values stay on screen.
+      }
+    },
+    [router],
+  );
 
   useEffect(() => {
     // A symbol we hold but have no price for must be fetched regardless of how
@@ -62,12 +75,12 @@ export function MarketRefresher({
     firedFor.current = reason;
 
     // Background refresh: intentionally silent, so no spinner state here.
-    void doRefresh();
+    void doRefresh(false);
   }, [fetchedAt, staleAfterHours, hasUnpriced, doRefresh]);
 
   async function manualRefresh() {
     setBusy(true);
-    await doRefresh();
+    await doRefresh(true);
     setBusy(false);
   }
 
