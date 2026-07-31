@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ReceiptText, Upload, Repeat } from "lucide-react";
+import { LayoutDashboard, ReceiptText, Upload, Repeat, Scale } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const NAV_ITEMS = [
   { href: "/dashboard", label: "דשבורד", icon: LayoutDashboard },
   { href: "/transactions", label: "הוצאות", icon: ReceiptText },
+  { href: "/net-worth", label: "הון עצמי", icon: Scale },
   { href: "/recurring", label: "קבועות", icon: Repeat },
   { href: "/import", label: "ייבוא", icon: Upload },
 ];
