@@ -21,6 +21,8 @@ import { ValueBadge } from "./value-badge";
 import { AssetForm, type AssetValues, type Member } from "./asset-form";
 import { LiabilityForm, type LiabilityValues } from "./liability-form";
 import { PrimeRateControl } from "./prime-rate-control";
+import { TradesEditor, type TradeRow } from "./trades-editor";
+import { DepositsEditor, type FlowRow, type RuleRow } from "./deposits-editor";
 import { Plus, Pencil, TrendingUp, TrendingDown, AlertTriangle } from "lucide-react";
 
 export type OwnerOption = { id: string; label: string };
@@ -35,7 +37,21 @@ export type AccountSeed = {
   fund_source: string | null;
   holdings: { symbol: string; quantity: number; market: string }[];
   latestValuation: { value: number; as_of: string } | null;
+  trades: TradeRow[];
+  flows: FlowRow[];
+  rules: RuleRow[];
 };
+
+/** Kinds whose detail view is a trade ledger rather than a deposit list. */
+const LEDGER_KINDS = new Set(["brokerage", "crypto"]);
+/** Kinds where tracking deposits is what makes the return meaningful. */
+const DEPOSIT_KINDS = new Set([
+  "pension",
+  "gemel",
+  "hishtalmut",
+  "cash",
+  "other",
+]);
 
 export type LiabilitySeed = {
   id: string;
@@ -81,6 +97,7 @@ export function PortfolioPanel({
   const [liabOpen, setLiabOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<ValuedAccount | null>(null);
   const [editingLiab, setEditingLiab] = useState<ValuedLiability | null>(null);
+  const [detailAsset, setDetailAsset] = useState<ValuedAccount | null>(null);
   const [saving, setSaving] = useState(false);
 
   const ownerOptions: OwnerOption[] = [
@@ -375,7 +392,7 @@ export function PortfolioPanel({
               <Row
                 key={a.id}
                 title={a.name}
-                subtitle={ASSET_KIND_LABELS[a.kind]}
+                subtitle={accountSubtitle(a)}
                 value={a.value}
                 badge={
                   <ValueBadge
@@ -390,6 +407,7 @@ export function PortfolioPanel({
                     ? `ללא מחיר: ${a.unpricedSymbols.join(", ")}`
                     : null
                 }
+                onOpen={() => setDetailAsset(a)}
                 onEdit={() => {
                   setEditingAsset(a);
                   setAssetOpen(true);
@@ -446,6 +464,57 @@ export function PortfolioPanel({
         </CardContent>
       </Card>
 
+      {/* Per-account detail: the ledger for a portfolio, deposits otherwise. */}
+      <Dialog
+        open={detailAsset !== null}
+        onOpenChange={(o) => {
+          if (!o) setDetailAsset(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{detailAsset?.name}</DialogTitle>
+            <DialogDescription>
+              {detailAsset && LEDGER_KINDS.has(detailAsset.kind)
+                ? "מה אתם מחזיקים, בכמה קניתם, וכמה זה עשה."
+                : "הפקדות ומשיכות — מה שהופך שינוי ביתרה לתשואה אמיתית."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[70vh] overflow-y-auto">
+            {detailAsset &&
+              (() => {
+                const seed = seedFor(detailAsset.id);
+                if (!seed) return null;
+                if (LEDGER_KINDS.has(detailAsset.kind)) {
+                  return (
+                    <TradesEditor
+                      accountId={detailAsset.id}
+                      positions={detailAsset.positions}
+                      trades={seed.trades}
+                    />
+                  );
+                }
+                if (DEPOSIT_KINDS.has(detailAsset.kind)) {
+                  return (
+                    <DepositsEditor
+                      accountId={detailAsset.id}
+                      flows={seed.flows}
+                      rules={seed.rules}
+                    />
+                  );
+                }
+                return (
+                  <p className="text-sm text-muted-foreground">
+                    לנכס מסוג זה אין מעקב עסקאות או הפקדות. עדכנו את השווי דרך
+                    עריכת החשבון.
+                  </p>
+                );
+              })()}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={assetOpen} onOpenChange={setAssetOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
@@ -490,6 +559,17 @@ export function PortfolioPanel({
   );
 }
 
+/** Kind, plus the profit figure once contributions are known. */
+function accountSubtitle(a: ValuedAccount): string {
+  const parts: string[] = [ASSET_KIND_LABELS[a.kind]];
+  if (a.gain !== null && a.contributed !== null && a.contributed !== 0) {
+    parts.push(`${a.gain >= 0 ? "רווח" : "הפסד"} ${formatILS(Math.abs(a.gain))}`);
+  }
+  const open = a.positions.filter((p) => p.quantity > 0).length;
+  if (open > 0) parts.push(`${open} ניירות`);
+  return parts.join(" · ");
+}
+
 /** One line describing the loan's shape, rate and remaining term. */
 function liabilitySubtitle(l: ValuedLiability): string {
   const parts: string[] = [LIABILITY_KIND_LABELS[l.kind]];
@@ -520,6 +600,7 @@ function Row({
   warning,
   negative,
   onEdit,
+  onOpen,
 }: {
   title: string;
   subtitle: string;
@@ -529,10 +610,17 @@ function Row({
   warning?: string | null;
   negative?: boolean;
   onEdit: () => void;
+  /** Opens the detail view (ledger / deposits). Omit for liabilities. */
+  onOpen?: () => void;
 }) {
+  const Body = onOpen ? "button" : "div";
   return (
     <div className="flex items-center gap-3 rounded-lg px-1 py-2 transition-colors hover:bg-accent/50">
-      <div className="min-w-0 flex-1">
+      <Body
+        type={onOpen ? "button" : undefined}
+        onClick={onOpen}
+        className={cn("min-w-0 flex-1", onOpen && "text-right")}
+      >
         <div className="flex items-center gap-2">
           <p className="truncate text-sm font-medium">{title}</p>
           {badge}
@@ -544,7 +632,7 @@ function Row({
             {warning}
           </p>
         )}
-      </div>
+      </Body>
 
       <div className="shrink-0 text-left">
         <p

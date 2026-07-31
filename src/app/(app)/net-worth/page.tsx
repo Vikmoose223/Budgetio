@@ -20,10 +20,18 @@ import { cpiRatio } from "@/lib/networth/sources/cpi";
 import { generateNetWorthInsights } from "@/lib/networth/insights";
 import { periodOf } from "@/lib/networth/drift";
 import type { Insight } from "@/lib/insights";
+import {
+  compareTo,
+  compareAccounts,
+  monthsAgo,
+  daysUntilComparable,
+} from "@/lib/networth/compare";
 import { AllocationDonut } from "./allocation-donut";
 import { NetWorthTrend } from "./net-worth-trend";
 import { PortfolioPanel } from "./portfolio-panel";
 import { MarketRefresher } from "./market-refresher";
+import { ComparisonCard, type PeriodComparison } from "./comparison-card";
+import { SnapshotWriter } from "./snapshot-writer";
 import {
   Scale,
   TrendingUp,
@@ -118,13 +126,46 @@ export default async function NetWorthPage() {
     accountIds.length
       ? supabase
           .from("account_flows")
-          .select("account_id, occurred_on, amount")
+          .select("id, account_id, occurred_on, amount, note")
           .in("account_id", accountIds)
       : Promise.resolve({ data: [] as never[] }),
     supabase.from("price_cache").select("symbol, market, price, currency, as_of, fetched_at"),
     supabase
       .from("fund_yields_cache")
       .select("fund_id, source, report_period, monthly_yield, avg_mgmt_fee"),
+  ]);
+
+  // Ledger, standing rules and recorded history.
+  const [
+    { data: tradeRows },
+    { data: ruleRows },
+    { data: accountSnapshotRows },
+    { data: netSnapshotRows },
+  ] = await Promise.all([
+    accountIds.length
+      ? supabase
+          .from("trades")
+          .select(
+            "id, account_id, symbol, market, side, quantity, price_per_unit, currency, fee, occurred_on, is_opening",
+          )
+          .in("account_id", accountIds)
+      : Promise.resolve({ data: [] as never[] }),
+    accountIds.length
+      ? supabase
+          .from("recurring_flows")
+          .select("id, account_id, amount, day_of_month, start_month, end_month, note")
+          .in("account_id", accountIds)
+      : Promise.resolve({ data: [] as never[] }),
+    accountIds.length
+      ? supabase
+          .from("account_snapshots")
+          .select("account_id, as_of, value")
+          .in("account_id", accountIds)
+      : Promise.resolve({ data: [] as never[] }),
+    supabase
+      .from("net_worth_snapshots")
+      .select("as_of, net_worth")
+      .eq("household_id", householdId),
   ]);
 
   // --- Index the raw rows by account ---------------------------------------
@@ -142,6 +183,8 @@ export default async function NetWorthPage() {
   const holdingsBy = byAccount(holdingRows);
   const valuationsBy = byAccount(valuationRows);
   const flowsBy = byAccount(flowRows);
+  const tradesBy = byAccount(tradeRows);
+  const rulesBy = byAccount(ruleRows);
 
   const fx = fxTableFrom(fxRows ?? []);
   const prices = priceIndex(priceRows ?? []);
@@ -188,6 +231,23 @@ export default async function NetWorthPage() {
       yields: fundKey ? (yieldsByFund.get(fundKey) ?? []) : [],
       fx,
       asOf: today,
+      trades: (tradesBy.get(account.id) ?? []).map((t) => ({
+        symbol: t.symbol,
+        market: t.market as "us" | "tase" | "crypto",
+        side: t.side as "buy" | "sell",
+        quantity: Number(t.quantity),
+        price_per_unit: Number(t.price_per_unit),
+        currency: t.currency,
+        fee: Number(t.fee),
+        occurred_on: t.occurred_on,
+        is_opening: t.is_opening,
+      })),
+      recurringRules: (rulesBy.get(account.id) ?? []).map((r) => ({
+        amount: Number(r.amount),
+        day_of_month: r.day_of_month,
+        start_month: r.start_month,
+        end_month: r.end_month,
+      })),
     });
   });
 
@@ -275,6 +335,42 @@ export default async function NetWorthPage() {
     avgMonthlyExpenses,
     feeByAccountId,
   });
+
+  // --- Comparison against recorded history ---------------------------------
+
+  const netSnapshots = (netSnapshotRows ?? []).map((s) => ({
+    as_of: s.as_of,
+    value: Number(s.net_worth),
+  }));
+  const allAccountSnapshots = (accountSnapshotRows ?? []).map((s) => ({
+    account_id: s.account_id,
+    as_of: s.as_of,
+    value: Number(s.value),
+  }));
+
+  const comparisons: PeriodComparison[] = ([1, 3, 12] as const).map((months) => {
+    const baselineDate = monthsAgo(today, months);
+    return {
+      months,
+      net: compareTo(summary.netWorth, netSnapshots, baselineDate),
+      accounts: compareAccounts(
+        valuedAccounts.map((a) => ({ id: a.id, value: a.value })),
+        allAccountSnapshots,
+        baselineDate,
+      ),
+      daysUntil: daysUntilComparable(netSnapshots, today, months),
+    };
+  });
+
+  const accountNames = Object.fromEntries(
+    valuedAccounts.map((a) => [a.id, a.name]),
+  );
+
+  // Today's point may not be written yet; the writer below fills it in.
+  const recordedToday = netSnapshots.some((s) => s.as_of === today);
+  const snapshotAccounts = valuedAccounts
+    .filter((a): a is typeof a & { value: number } => a.value !== null)
+    .map((a) => ({ id: a.id, value: a.value, basis: a.basis }));
 
   const donutData = summary.byKind.map((k, i) => ({
     name: k.label,
@@ -438,6 +534,20 @@ export default async function NetWorthPage() {
         </Card>
       </div>
 
+      {/* Progress over time */}
+      <ComparisonCard comparisons={comparisons} accountNames={accountNames} />
+
+      {/* Records today's point so next month has something to compare to. */}
+      <SnapshotWriter
+        accounts={snapshotAccounts}
+        totals={{
+          assets: summary.totalAssets,
+          liabilities: summary.totalLiabilities,
+          net: summary.netWorth,
+        }}
+        alreadyRecordedToday={recordedToday}
+      />
+
       {/* Trend */}
       <Card className="mt-4">
         <CardHeader>
@@ -475,6 +585,32 @@ export default async function NetWorthPage() {
             );
             return newest ? { value: Number(newest.value), as_of: newest.as_of } : null;
           })(),
+          trades: (tradesBy.get(a.id) ?? []).map((t) => ({
+            id: t.id,
+            symbol: t.symbol,
+            market: t.market as "us" | "tase" | "crypto",
+            side: t.side as "buy" | "sell",
+            quantity: Number(t.quantity),
+            price_per_unit: Number(t.price_per_unit),
+            currency: t.currency,
+            fee: Number(t.fee),
+            occurred_on: t.occurred_on,
+            is_opening: t.is_opening,
+          })),
+          flows: (flowsBy.get(a.id) ?? []).map((f) => ({
+            id: f.id,
+            occurred_on: f.occurred_on,
+            amount: Number(f.amount),
+            note: f.note,
+          })),
+          rules: (rulesBy.get(a.id) ?? []).map((r) => ({
+            id: r.id,
+            amount: Number(r.amount),
+            day_of_month: r.day_of_month,
+            start_month: r.start_month,
+            end_month: r.end_month,
+            note: r.note,
+          })),
         }))}
         liabilitySeeds={liabilities.map((l) => ({
           id: l.id,

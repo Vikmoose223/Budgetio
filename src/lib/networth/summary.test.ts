@@ -14,6 +14,9 @@ const asset = (over: Partial<ValuedAccount> = {}): ValuedAccount => ({
   lastYieldPeriod: null,
   unpricedSymbols: [],
   returnRate: null,
+  positions: [],
+  contributed: null,
+  gain: null,
   ...over,
 });
 

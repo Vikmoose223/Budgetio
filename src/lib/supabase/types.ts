@@ -559,6 +559,139 @@ export type Database = {
         Update: { period?: number; value?: number; fetched_at?: Timestamp };
         Relationships: [];
       };
+      // --- Trades & history (migration 0007) --------------------------------
+      trades: {
+        Row: {
+          id: string;
+          account_id: string;
+          symbol: string;
+          market: Market;
+          side: "buy" | "sell";
+          quantity: number;
+          price_per_unit: number;
+          currency: string;
+          fee: number;
+          occurred_on: string;
+          is_opening: boolean;
+          note: string | null;
+          created_at: Timestamp;
+        };
+        Insert: {
+          id?: string;
+          account_id: string;
+          symbol: string;
+          market: Market;
+          side?: "buy" | "sell";
+          quantity: number;
+          price_per_unit: number;
+          currency?: string;
+          fee?: number;
+          occurred_on: string;
+          is_opening?: boolean;
+          note?: string | null;
+          created_at?: Timestamp;
+        };
+        Update: {
+          id?: string;
+          account_id?: string;
+          symbol?: string;
+          market?: Market;
+          side?: "buy" | "sell";
+          quantity?: number;
+          price_per_unit?: number;
+          currency?: string;
+          fee?: number;
+          occurred_on?: string;
+          is_opening?: boolean;
+          note?: string | null;
+          created_at?: Timestamp;
+        };
+        Relationships: [];
+      };
+      recurring_flows: {
+        Row: {
+          id: string;
+          account_id: string;
+          amount: number;
+          day_of_month: number;
+          start_month: string;
+          end_month: string | null;
+          note: string | null;
+          created_at: Timestamp;
+        };
+        Insert: {
+          id?: string;
+          account_id: string;
+          amount: number;
+          day_of_month?: number;
+          start_month: string;
+          end_month?: string | null;
+          note?: string | null;
+          created_at?: Timestamp;
+        };
+        Update: {
+          id?: string;
+          account_id?: string;
+          amount?: number;
+          day_of_month?: number;
+          start_month?: string;
+          end_month?: string | null;
+          note?: string | null;
+          created_at?: Timestamp;
+        };
+        Relationships: [];
+      };
+      account_snapshots: {
+        Row: {
+          account_id: string;
+          as_of: string;
+          value: number;
+          basis: string;
+          created_at: Timestamp;
+        };
+        Insert: {
+          account_id: string;
+          as_of: string;
+          value: number;
+          basis?: string;
+          created_at?: Timestamp;
+        };
+        Update: {
+          account_id?: string;
+          as_of?: string;
+          value?: number;
+          basis?: string;
+          created_at?: Timestamp;
+        };
+        Relationships: [];
+      };
+      net_worth_snapshots: {
+        Row: {
+          household_id: string;
+          as_of: string;
+          total_assets: number;
+          total_liabilities: number;
+          net_worth: number;
+          created_at: Timestamp;
+        };
+        Insert: {
+          household_id: string;
+          as_of: string;
+          total_assets?: number;
+          total_liabilities?: number;
+          net_worth?: number;
+          created_at?: Timestamp;
+        };
+        Update: {
+          household_id?: string;
+          as_of?: string;
+          total_assets?: number;
+          total_liabilities?: number;
+          net_worth?: number;
+          created_at?: Timestamp;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {

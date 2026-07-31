@@ -174,19 +174,19 @@ export async function POST() {
   }
 
   if (snapshots.length > 0) {
-    // A manual entry for the same day is the more authoritative number, so
-    // don't clobber it: only insert where nothing exists yet.
-    const { data: existing } = await supabase
-      .from("valuations")
-      .select("account_id")
-      .eq("as_of", asOf)
-      .in(
-        "account_id",
-        snapshots.map((s) => s.account_id),
-      );
-    const taken = new Set((existing ?? []).map((e) => e.account_id));
-    const fresh = snapshots.filter((s) => !taken.has(s.account_id));
-    if (fresh.length > 0) await supabase.from("valuations").insert(fresh);
+    // Snapshots go to their own table, never to `valuations`. A valuation is
+    // the anchor a pension balance drifts forward from — writing computed
+    // estimates there would make tomorrow's drift compound on top of today's
+    // estimate instead of on the balance the user actually entered.
+    await supabase.from("account_snapshots").upsert(
+      snapshots.map((s) => ({
+        account_id: s.account_id,
+        as_of: s.as_of,
+        value: s.value,
+        basis: "holdings",
+      })),
+      { onConflict: "account_id,as_of" },
+    );
   }
 
   // --- CPI (only needed when something is index-linked) --------------------

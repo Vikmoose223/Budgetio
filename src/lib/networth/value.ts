@@ -8,6 +8,14 @@ import { toILS, type FxTable } from "./currency";
 import { driftFromAnchor, type Flow, type MonthlyYield } from "./drift";
 import { loanState, effectiveRate, type LoanType } from "./amortization";
 import { accountReturn } from "./xirr";
+import {
+  buildPositions,
+  valuePositions,
+  tradesAsFlows,
+  type Trade,
+  type ValuedPosition,
+} from "./positions";
+import { allFlows, netContributed, type RecurringFlowRule } from "./recurring-flows";
 
 export type AssetKind =
   | "pension"
@@ -77,6 +85,12 @@ export type ValuedAccount = {
   unpricedSymbols: string[];
   /** Annualised money-weighted return, or null when flows are unknown. */
   returnRate: number | null;
+  /** Per-symbol detail, when the account has a trade ledger. */
+  positions: ValuedPosition[];
+  /** Net deposited into this account, when flows are known. */
+  contributed: number | null;
+  /** value − contributed: profit in shekels, when both are known. */
+  gain: number | null;
 };
 
 function priceKey(symbol: string, market: string): string {
@@ -103,6 +117,10 @@ export type ValueAccountInput = {
   yields: MonthlyYield[];
   fx: FxTable;
   asOf: string;
+  /** Trade ledger. When present it supersedes `holdings` for quantities. */
+  trades?: Trade[];
+  /** Standing deposit rules, expanded into flows on read. */
+  recurringRules?: RecurringFlowRule[];
 };
 
 /**
@@ -114,6 +132,8 @@ export type ValueAccountInput = {
 export function valueAccount(input: ValueAccountInput): ValuedAccount {
   const { account, holdings, prices, valuations, flows, yields, fx, asOf } =
     input;
+  const trades = input.trades ?? [];
+  const recurringRules = input.recurringRules ?? [];
 
   const base = {
     id: account.id,
@@ -122,8 +142,75 @@ export function valueAccount(input: ValueAccountInput): ValuedAccount {
     ownerProfileId: account.owner_profile_id,
   };
 
+  // Every source of money in or out, in one list. Trades count as flows too,
+  // so a brokerage return and a pension return are computed the same way.
+  const combinedFlows = allFlows(
+    [...flows, ...tradesAsFlows(trades, fx)],
+    recurringRules,
+    asOf,
+  );
+  const contributed = combinedFlows.length > 0 ? netContributed(combinedFlows) : null;
+
+  const finish = (value: number | null): { returnRate: number | null; gain: number | null } => ({
+    returnRate: value === null ? null : accountReturn(combinedFlows, value, asOf),
+    gain: value === null || contributed === null ? null : round2(value - contributed),
+  });
+
   // Latest anchor, if any.
   const latest = [...valuations].sort((a, b) => b.as_of.localeCompare(a.as_of))[0];
+
+  // --- 0. Trade ledger ----------------------------------------------------
+  // A ledger knows both what's held and what it cost, so it supersedes the
+  // bare quantity in `holdings`.
+  if (trades.length > 0) {
+    const positions = valuePositions(
+      buildPositions(trades),
+      (symbol, market) => {
+        const row = prices.get(priceKey(symbol, market));
+        return row ? { price: Number(row.price), currency: row.currency } : null;
+      },
+      fx,
+    );
+
+    const open = positions.filter((p) => p.quantity > 0);
+    const priced = open.filter((p) => p.marketValue !== null);
+    const unpriced = open.filter((p) => p.marketValue === null).map((p) => p.symbol);
+
+    if (priced.length > 0) {
+      const value = round2(priced.reduce((sum, p) => sum + (p.marketValue ?? 0), 0));
+      let newestPrice: string | null = null;
+      for (const p of open) {
+        const row = prices.get(priceKey(p.symbol, p.market));
+        if (row && (!newestPrice || row.as_of > newestPrice)) newestPrice = row.as_of;
+      }
+      return {
+        ...base,
+        value,
+        basis: "holdings",
+        asOf: newestPrice,
+        estimated: false,
+        lastYieldPeriod: null,
+        unpricedSymbols: unpriced,
+        positions,
+        contributed,
+        ...finish(value),
+      };
+    }
+
+    // Nothing priced yet: still surface the ledger so cost basis is visible.
+    return {
+      ...base,
+      value: null,
+      basis: "none",
+      asOf: null,
+      estimated: false,
+      lastYieldPeriod: null,
+      unpricedSymbols: unpriced,
+      positions,
+      contributed,
+      ...finish(null),
+    };
+  }
 
   // --- 1. Priced holdings -------------------------------------------------
   if (holdings.length > 0) {
@@ -158,7 +245,9 @@ export function valueAccount(input: ValueAccountInput): ValuedAccount {
         estimated: false,
         lastYieldPeriod: null,
         unpricedSymbols: unpriced,
-        returnRate: accountReturn(flows, value, asOf),
+        positions: [],
+        contributed,
+        ...finish(value),
       };
     }
     // Nothing could be priced — fall through to the manual balance.
@@ -187,7 +276,9 @@ export function valueAccount(input: ValueAccountInput): ValuedAccount {
         estimated: drifted.estimated,
         lastYieldPeriod: drifted.lastYieldPeriod,
         unpricedSymbols: [],
-        returnRate: accountReturn(flows, drifted.value, asOf),
+        positions: [],
+        contributed,
+        ...finish(drifted.value),
       };
     }
 
@@ -199,7 +290,9 @@ export function valueAccount(input: ValueAccountInput): ValuedAccount {
       estimated: false,
       lastYieldPeriod: null,
       unpricedSymbols: [],
-      returnRate: accountReturn(flows, anchorILS, asOf),
+      positions: [],
+      contributed,
+      ...finish(round2(anchorILS)),
     };
   }
 
@@ -218,6 +311,9 @@ function unvaluable(
     estimated: false,
     lastYieldPeriod: null,
     unpricedSymbols,
+    positions: [],
+    contributed: null,
+    gain: null,
     returnRate: null,
   };
 }
